@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pb-distortion"
+version = "0.1.0"
+description = "Reproducible experiments on preference elicitation in participatory budgeting"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["numpy>=1.26", "matplotlib>=3.8"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+pb-distortion = "pb_distortion.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pb_distortion"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

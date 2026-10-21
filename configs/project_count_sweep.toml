@@ -1,0 +1,29 @@
+[simulation]
+trials = 200
+master_seed = 42
+
+[instance]
+project_counts = [5, 10, 20, 30, 40, 50, 75, 100, 150, 200]
+voter_count = 50
+cost_min = 1
+cost_max = 10
+budget_fraction = 0.33
+
+[utilities]
+distribution = "uniform"
+minimum = 0.0
+maximum = 1.0
+normal_mean = 0.5
+normal_std = 0.2
+pareto_shape = 1.5
+normalize_rows = true
+
+[noise]
+sigma = 0.5
+
+[analysis]
+bootstrap_resamples = 2000
+confidence_level = 0.95
+
+[output]
+directory = "outputs/project_count_sweep_seed_42"

@@ -1,0 +1,25 @@
+[simulation]
+trials = 200
+master_seed = 20261020
+
+[instance]
+project_count = 10
+voter_count = 50
+cost_min = 1
+cost_max = 10
+budget_fraction = 0.30
+
+[utilities]
+distribution = "uniform"
+minimum = 0.0
+maximum = 1.0
+normal_mean = 0.5
+normal_std = 0.2
+pareto_shape = 1.5
+normalize_rows = true
+
+[noise]
+sigma = 0.0
+
+[output]
+directory = "outputs/baseline"
