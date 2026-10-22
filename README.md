@@ -43,6 +43,26 @@ uv run pb-distortion --config configs/project_count_sweep.toml
 
 The sweep config uses 200 elections per point, 50 voters, seed 42, costs from 1 to 10, budget fraction 0.33, and project counts 5, 10, 20, 30, 40, 50, 75, 100, 150, and 200. It writes trial results, a summary with 95% percentile-bootstrap confidence intervals, metadata, and an SVG plot.
 
+### Choose the ballot format
+
+By default, elections use the knapsack ballot format with greedy approval aggregation. You can run threshold approval voting using `--format threshold_approval`:
+
+```bash
+# Threshold approval baseline (default threshold 1/m)
+uv run pb-distortion --config configs/baseline.toml --format threshold_approval
+
+# Project-count sweep with threshold approval
+uv run pb-distortion --config configs/project_count_sweep.toml --format threshold_approval
+
+# Configure threshold explicitly and aggregation ordering
+uv run pb-distortion --config configs/baseline.toml --format threshold_approval --threshold 0.1 --approval-mode cost_ratio
+```
+
+Supported `--approval-mode` values for threshold approval:
+- `count` (default): Greedily selects projects by descending approval count.
+- `cost_ratio`: Greedily selects projects by descending approval-to-cost ratio.
+- `knapsack`: Solves the exact knapsack problem maximizing approval counts.
+
 ### Choose the utility distribution
 
 The same config can be reused for all supported distributions:
@@ -123,7 +143,9 @@ src/pb_distortion/
   generation.py             Utility draws, normalization, and noise
   protocols.py              Interfaces for ballots and aggregation rules
   formats/knapsack.py       Knapsack ballot elicitation
+  formats/threshold_approval.py Threshold approval ballot elicitation
   rules/greedy_approval.py  Greedy approval-count aggregation
+  rules/threshold_approval.py Threshold approval aggregation (count, cost_ratio, knapsack)
   solvers.py                Exact integer-cost knapsack dynamic program
   metrics.py                Welfare and sampled distortion
   simulation.py             Election runner and trial output

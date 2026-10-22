@@ -79,7 +79,9 @@ where `epsilon` is a standard-normal draw. The multiplier has mean one. Noise do
 ### Ballot format and aggregation rule
 
 - **`src/pb_distortion/formats/knapsack.py`** — `KnapsackBallotFormat.elicit(...)` solves an exact knapsack problem using the voter’s perceived value vector. The returned ballot is a `frozenset` of project IDs.
-- **`src/pb_distortion/rules/greedy_approval.py`** — `GreedyApprovalRule` counts project appearances in ballots, orders projects by decreasing count, then project ID, and funds each project that fits. If a project does not fit the remaining budget, it skips that project and continues. Projects with zero approvals remain eligible at the bottom of the order.
+- **`src/pb_distortion/formats/threshold_approval.py`** — `ThresholdApprovalBallotFormat.elicit(...)` approves each project where perceived utility meets or exceeds a threshold (defaulting dynamically to $1/m$, following Benadè et al. Theorem 14). The returned ballot is a `frozenset` of approved project IDs.
+- **`src/pb_distortion/rules/greedy_approval.py`** — `GreedyApprovalRule` counts project appearances in knapsack ballots, orders projects by decreasing count, then project ID, and funds each project that fits. If a project does not fit the remaining budget, it skips that project and continues. Projects with zero approvals remain eligible at the bottom of the order.
+- **`src/pb_distortion/rules/threshold_approval.py`** — `ThresholdApprovalRule` aggregates threshold approval ballots. Unlike knapsack ballots, submitted ballots are not constrained by individual budget feasibility. Supports `'count'` (default greedy approval with skip), `'cost_ratio'` (greedy approval/cost ratio with skip), and `'knapsack'` (exact 0/1 knapsack dynamic program on approval counts).
 
 ### Optimization and metrics
 
@@ -103,6 +105,7 @@ where `epsilon` is a standard-normal draw. The multiplier has mean one. Noise do
 
 - **`tests/test_solvers.py`** — compares the dynamic program with exhaustive enumeration on small cases.
 - **`tests/test_knapsack.py`** — checks the ballot format and feasible utility-maximizing bundles.
+- **`tests/test_threshold_approval.py`** — checks threshold approval ballot format cutoff logic, budget-unconstrained approval sets, aggregation ordering, tie-breaking, feasibility, and simulation integration.
 - **`tests/test_greedy_approval.py`** — checks approval counts, budget feasibility, ordering, and tie-breaking.
 - **`tests/test_simulation.py`** — checks generated settings, repeatability, feasible welfare, and noise semantics.
 - **`tests/test_distributions.py`** — checks distributions, configuration selection, noise math, and unique output directories.
