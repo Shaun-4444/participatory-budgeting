@@ -4,10 +4,11 @@ This repository is a reproducible simulation project for studying how ballot for
 
 The reported quantity is the **sampled-instance distortion**
 
-\[
+$$
+\text{distortion} =
 \frac{\text{optimal feasible welfare under the generated true utilities}}
      {\text{welfare of the outcome selected from submitted ballots}}.
-\]
+$$
 
 This is an empirical ratio on a generated election. It is not the paper’s formal worst-case distortion over all utility profiles consistent with a ballot profile.
 
