@@ -55,10 +55,11 @@ where `epsilon` is a standard-normal draw. The multiplier has mean one. Noise do
 
 ### Project settings and packaging
 
-- **`pyproject.toml`** — package metadata, Python requirement, dependencies, the `pb-distortion` command entry point, and pytest settings. Runtime dependencies are NumPy and Matplotlib; pytest is in the `dev` extra.
+- **`pyproject.toml`** — package metadata, Python requirement, dependencies, the `pb-distortion` and `pb-distortion-pabulib` command entry points, and pytest settings. Runtime dependencies are NumPy, Matplotlib, and SciPy; pytest is in the `dev` extra.
 - **`uv.lock`** — locks package versions so teammates can recreate the environment with `uv sync --extra dev`.
 - **`configs/baseline.toml`** — small single-project-count baseline settings.
 - **`configs/project_count_sweep.toml`** — the main multi-count experiment. It has 200 elections at each of 10 project counts, 50 voters, seed 42, costs 1–10, budget fraction 0.33, bootstrap settings, distribution parameters, and a default sigma of zero.
+- **`configs/pabulib_amsterdam.toml`** — settings for the real-data-informed Amsterdam Centrum 2020 sweep: project counts, subprofile size, number of consistent utility draws, seed, bootstrap, and output folder.
 
 ### Shared data and interfaces
 
@@ -75,6 +76,14 @@ where `epsilon` is a standard-normal draw. The multiplier has mean one. Noise do
   - `normalize_utility_rows` rescales each voter’s utility row to sum to one.
   - `perturb_utilities` applies the mean-corrected lognormal multiplier and checks the result is finite.
   - `generate_synthetic_election` draws project costs and utilities, creates the budget as `ceil(budget_fraction * total_project_cost)`, normalizes if requested, perturbs utilities, and returns an `Election` containing both profiles.
+
+### Pabulib real-data-informed experiment
+
+- **`src/pb_distortion/pabulib_data.py`** — reads the three semicolon-delimited `.pb` sections using Python's CSV parser. It preserves project and voter IDs, parses decimal costs exactly, and accepts the current experiment only when the election is approval voting with `max_sum_cost` equal to the global budget. It validates recorded ballots and reduces integer costs and budget by their common divisor so exact dynamic programming stays small. `make_scaled_subinstance` takes a project subset and scales its budget to preserve the source budget-to-total-cost ratio.
+- **`src/pb_distortion/utility_inference.py`** — samples one normalized, nonnegative additive utility vector consistent with a recorded knapsack ballot. A random linear objective is optimized by `scipy.optimize.linprog`. Since there are exponentially many feasible alternative bundles, the module adds violated comparisons lazily; the existing exact knapsack solver finds a bundle that is more valuable than the recorded vote, if one exists. Each LP vertex is blended with a Dirichlet utility vector supported on the submitted bundle; the default witness weight is 0.75. This is a non-uniform model-based draw, not a uniform sample from the feasible utility region. The result is a model of latent values, not observed true utility.
+- **`src/pb_distortion/pabulib_sweep.py`** — samples voter subprofiles, draws multiple consistent utility profiles for each, creates nested random project subsets, re-elicits ballots at each project count, and evaluates distortion with exact welfare optimization. Bootstrap resampling is clustered by voter subprofile. The runner accepts format/rule pairs, so later ballot modules can share the same inferred utility profiles and project subsets.
+- **`src/pb_distortion/real_cli.py`** — configures the current knapsack/greedy-approval pair, runs the Pabulib sweep, and writes the plot and data outputs to a unique folder.
+- **SciPy** — is now a runtime dependency for the utility-consistency linear programs. The welfare optimum and individual knapsack ballots remain exact dynamic programs; they do not use `linprog`.
 
 ### Ballot format and aggregation rule
 
@@ -98,6 +107,7 @@ where `epsilon` is a standard-normal draw. The multiplier has mean one. Noise do
   - The writer saves trial-level CSV, summary CSV, and run metadata.
 - **`src/pb_distortion/plotting.py`** — plots means with asymmetric confidence intervals. SVG output is generated directly; other extensions use Matplotlib.
 - **`src/pb_distortion/cli.py`** — reads TOML, handles `--distribution`, `--noise-sigma`, `--noise-sigmas`, and `--output`, wires the current knapsack format/rule, creates unique output folders, writes results, and prints summaries.
+- **`pb-distortion-pabulib` command** — invokes `real_cli.py` with the Pabulib config. The Pabulib run writes `trials.csv`, `summary.csv`, `run.json`, and `distortion_by_project_count.svg` under `outputs/pabulib/`.
 
 ### Tests and generated files
 
@@ -107,6 +117,9 @@ where `epsilon` is a standard-normal draw. The multiplier has mean one. Noise do
 - **`tests/test_simulation.py`** — checks generated settings, repeatability, feasible welfare, and noise semantics.
 - **`tests/test_distributions.py`** — checks distributions, configuration selection, noise math, and unique output directories.
 - **`tests/test_plotting.py`** — checks plotting validation and output generation.
+- **`tests/test_pabulib_data.py`** — checks `.pb` parsing, cost feasibility, exact decimal scaling, and budget-preserving project subsets.
+- **`tests/test_utility_inference.py`** — checks normalization and ballot consistency of inferred utility vectors.
+- **`tests/test_pabulib_sweep.py`** — checks seeded reproducibility, exact distortion bounds, and bootstrap output on a small election.
 - **`outputs/`** — generated experiment artifacts. It is excluded from Git so CSVs and plots do not enter commits accidentally.
 
 ## 4. Config values and outputs
@@ -136,11 +149,17 @@ Each project-count sweep writes:
 
 A noise sweep also writes a folder for each sigma and, at the batch level, `noise_sweep_summary.csv`, `noise_sweep_run.json`, and `distortion_by_noise_sigma.svg`.
 
+The Pabulib sweep's trial CSV has one row for each voter subprofile, utility draw, project count, and implemented format/rule pair. It records random seeds, source-unit project/budget totals, welfare values, distortion, exact-benchmark status, and selected project IDs. The JSON metadata records the source-file SHA-256, dataset metadata, utility sampling assumptions, cost scaling, and the fact that neighborhood budgets are not enforced.
+
 ## 5. Reproducibility
 
 The master seed is expanded into one child seed per trial. All random draws for an election use that trial’s NumPy generator. A zero-noise run skips epsilon draws, so it reproduces the previous baseline exactly. Different sigma runs use matching trial seeds; the utility draw occurs before noise, so the true utilities and costs match across sigma values. Bootstrap seeds are derived from the master seed and project count.
 
 Do not interpret overlapping or separated bootstrap intervals as a formal theorem about worst-case distortion. They summarize the simulated elections and the chosen utility model.
+
+For the Amsterdam dataset, the 85-project file has 8,520 approval/knapsack ballots with a €500,000 `max_sum_cost`. The Pabulib run samples 20 subprofiles of 5 voters and 5 utility profiles per subprofile, using master seed 42 by default. Each LP draw is blended 75% with a Dirichlet utility witness over the voter's reported projects by default. Its project-count points are counterfactual nested project subsets of this one election, not independent recorded elections at each project count. The budget for each subset is scaled to maintain the source budget-to-total-project-cost ratio. All curves currently come from the knapsack ballot and greedy approval rule; future format/rule pairs can be passed to the same runner.
+
+The source instance specifies additional neighborhood budgets and labels the official selection rule `greedy-custom`. The current paper-aligned experiment uses the paper's single global budget model and does not enforce those neighborhood caps. It therefore does not reproduce or score the official Amsterdam outcome. Treat its ratios as model-based distortion under the stated inferred utility sampler, not as welfare loss under known true utilities.
 
 ## 6. Extending the repository: add another ballot format
 
