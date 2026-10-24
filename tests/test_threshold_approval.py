@@ -108,11 +108,11 @@ def test_threshold_approval_rule_ordering_and_tie_breaking():
         frozenset({"p1", "p2"}),
         frozenset({"p0", "p1", "p2"}),
     ]
-    rule = ThresholdApprovalRule(mode="count")
+    rule = ThresholdApprovalRule()
     outcome = rule.aggregate(ballots, instance)
 
-    # p1 has 3 approvals (cost 2) -> funded
-    # p0 and p2 are tied at 2 approvals; tie broken by ID -> p0 (cost 2) -> funded
+    # p1 has ratio 3/2 = 1.5 -> funded
+    # p0 and p2 are tied at ratio 2/2 = 1.0 and 2 approvals; tie broken by ID -> p0 -> funded
     # Budget of 4 is now full (p1, p0).
     assert set(outcome) == {"p0", "p1"}
     assert bundle_cost(instance, outcome) <= instance.budget
@@ -121,54 +121,57 @@ def test_threshold_approval_rule_ordering_and_tie_breaking():
 def test_threshold_approval_rule_skips_non_fitting_projects():
     instance = PBInstance(
         project_ids=("p0", "p1", "p2"),
-        costs=(5, 10, 3),
+        costs=(10, 5, 3),
         budget=8,
     )
-    # Approvals: p1 has 3, p0 has 2, p2 has 1
+    # p0: cost 10, 5 approvals -> ratio 0.50
+    # p1: cost 5, 2 approvals -> ratio 0.40
+    # p2: cost 3, 1 approval -> ratio 0.333
     ballots = [
         frozenset({"p0", "p1"}),
-        frozenset({"p1"}),
-        frozenset({"p1", "p2"}),
+        frozenset({"p0", "p1"}),
+        frozenset({"p0", "p2"}),
+        frozenset({"p0"}),
+        frozenset({"p0"}),
     ]
-    rule = ThresholdApprovalRule(mode="count")
+    rule = ThresholdApprovalRule()
     outcome = rule.aggregate(ballots, instance)
 
-    # p1 has 3 approvals but cost is 10 > budget 8 -> skipped!
-    # p0 has 2 approvals, cost 5 <= 8 -> funded (remaining budget 3)
-    # p2 has 1 approval, cost 3 <= 3 -> funded (remaining budget 0)
-    assert outcome == ("p0", "p2")
+    # p0 has the highest ratio (0.50) but cost 10 exceeds budget 8 -> skipped!
+    # p1 has next ratio (0.40), cost 5 <= 8 -> funded (remaining budget 3)
+    # p2 has next ratio (0.333), cost 3 <= 3 -> funded (remaining budget 0)
+    assert outcome == ("p1", "p2")
     assert bundle_cost(instance, outcome) == 8
 
 
-def test_threshold_approval_rule_modes():
+def test_threshold_approval_rule_cost_ratio_ordering():
     instance = PBInstance(
-        project_ids=("p0", "p1"),
-        costs=(1, 5),
+        project_ids=("p0", "p1", "p2", "p3"),
+        costs=(1, 5, 2, 2),
         budget=5,
     )
-    # p0: 2 approvals (cost 1, ratio 2.0)
-    # p1: 3 approvals (cost 5, ratio 0.6)
+    # Approvals:
+    # p0: 2 approvals, cost 1 -> ratio 2.0
+    # p1: 4 approvals, cost 5 -> ratio 0.8
+    # p2: 2 approvals, cost 2 -> ratio 1.0
+    # p3: 2 approvals, cost 2 -> ratio 1.0
     ballots = [
-        frozenset({"p0", "p1"}),
-        frozenset({"p0", "p1"}),
+        frozenset({"p0", "p1", "p2", "p3"}),
+        frozenset({"p0", "p1", "p2", "p3"}),
+        frozenset({"p1"}),
         frozenset({"p1"}),
     ]
 
-    # 'count' mode: p1 has 3 approvals, fits into budget 5 -> funds ('p1',)
-    rule_count = ThresholdApprovalRule(mode="count")
-    assert rule_count.aggregate(ballots, instance) == ("p1",)
+    rule = ThresholdApprovalRule()
+    outcome = rule.aggregate(ballots, instance)
 
-    # 'cost_ratio' mode: p0 has ratio 2.0 vs p1 ratio 0.6 -> funds ('p0',)
-    rule_ratio = ThresholdApprovalRule(mode="cost_ratio")
-    assert rule_ratio.aggregate(ballots, instance) == ("p0",)
-
-    # 'knapsack' mode: finds exact knapsack maximizing total approvals
-    # subset {p1} gives 3 approvals (cost 5 <= 5)
-    # subset {p0} gives 2 approvals (cost 1 <= 5)
-    # subset {p0, p1} cost 6 > 5
-    # knapsack picks {p1}
-    rule_knap = ThresholdApprovalRule(mode="knapsack")
-    assert rule_knap.aggregate(ballots, instance) == ("p1",)
+    # Ordering:
+    # 1. p0 (ratio 2.0, cost 1) -> funded, remaining 4
+    # 2. p2 & p3 tied at ratio 1.0 and 2 approvals; tie broken by ID -> p2 (cost 2) funded, remaining 2
+    # 3. p3 (ratio 1.0, cost 2) -> funded, remaining 0
+    # 4. p1 (ratio 0.8, cost 5) -> does not fit (skipped)
+    assert outcome == ("p0", "p2", "p3")
+    assert bundle_cost(instance, outcome) == 5
 
 
 def test_threshold_approval_rule_rejects_unknown_projects():

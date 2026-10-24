@@ -1,4 +1,4 @@
-"""Threshold approval aggregation rules."""
+"""Threshold approval aggregation rule: greedy cost-ratio selection."""
 
 from __future__ import annotations
 
@@ -8,30 +8,19 @@ from dataclasses import dataclass
 
 from pb_distortion.formats.threshold_approval import ThresholdApprovalBallot
 from pb_distortion.models import Outcome, PBInstance
-from pb_distortion.solvers import solve_knapsack
 
 
 @dataclass(frozen=True, slots=True)
 class ThresholdApprovalRule:
-    """Aggregate threshold approval ballots into a feasible project bundle.
+    """Aggregate threshold approval ballots using greedy approval-to-cost ratio.
 
-    Modes:
-    - 'count': Greedily select projects ordered by descending approval count,
-      skipping projects that exceed remaining budget. Ties broken by project ID ascending.
-    - 'cost_ratio': Greedily select projects ordered by descending approval/cost ratio,
-      then approval count, then project ID ascending.
-    - 'knapsack': Exact dynamic-programming knapsack maximizing total approvals
-      subject to the budget constraint.
+    Projects are ordered descending by their approval-to-cost ratio (approvals / cost).
+    Ties are broken first by descending approval count, then by ascending project ID.
+    Projects are greedily funded under the budget constraint with skip logic.
+    This corresponds to the canonical aggregation algorithm analyzed in Benadè et al. (Theorem 14).
     """
 
     name: str = "threshold_approval"
-    mode: str = "count"
-
-    def __post_init__(self) -> None:
-        if self.mode not in {"count", "cost_ratio", "knapsack"}:
-            raise ValueError(
-                f"Invalid mode '{self.mode}'. Must be 'count', 'cost_ratio', or 'knapsack'."
-            )
 
     def approval_scores(
         self,
@@ -55,33 +44,17 @@ class ThresholdApprovalRule:
         instance: PBInstance,
     ) -> Outcome:
         scores = self.approval_scores(ballots, instance)
-
-        if self.mode == "knapsack":
-            values = [float(scores[project_id]) for project_id in instance.project_ids]
-            return solve_knapsack(
-                instance.project_ids,
-                instance.costs,
-                values,
-                instance.budget,
-            )
-
         costs = instance.cost_by_project()
-        if self.mode == "count":
-            ordering = sorted(
-                instance.project_ids,
-                key=lambda project_id: (-scores[project_id], project_id),
-            )
-        elif self.mode == "cost_ratio":
-            ordering = sorted(
-                instance.project_ids,
-                key=lambda project_id: (
-                    -scores[project_id] / costs[project_id],
-                    -scores[project_id],
-                    project_id,
-                ),
-            )
-        else:
-            raise ValueError(f"Unknown mode: {self.mode}")
+
+        # Order by descending approval/cost ratio, then descending approvals, then ascending project ID
+        ordering = sorted(
+            instance.project_ids,
+            key=lambda project_id: (
+                -scores[project_id] / costs[project_id],
+                -scores[project_id],
+                project_id,
+            ),
+        )
 
         selected: list[str] = []
         spent = 0

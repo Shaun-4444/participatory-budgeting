@@ -48,20 +48,17 @@ The sweep config uses 200 elections per point, 50 voters, seed 42, costs from 1 
 By default, elections use the knapsack ballot format with greedy approval aggregation. You can run threshold approval voting using `--format threshold_approval`:
 
 ```bash
-# Threshold approval baseline (default threshold 1/m)
+# Threshold approval baseline (default threshold 1/m, greedy cost-ratio aggregation)
 uv run pb-distortion --config configs/baseline.toml --format threshold_approval
 
 # Project-count sweep with threshold approval
 uv run pb-distortion --config configs/project_count_sweep.toml --format threshold_approval
 
-# Configure threshold explicitly and aggregation ordering
-uv run pb-distortion --config configs/baseline.toml --format threshold_approval --threshold 0.1 --approval-mode cost_ratio
+# Configure threshold explicitly
+uv run pb-distortion --config configs/baseline.toml --format threshold_approval --threshold 0.1
 ```
 
-Supported `--approval-mode` values for threshold approval:
-- `count` (default): Greedily selects projects by descending approval count.
-- `cost_ratio`: Greedily selects projects by descending approval-to-cost ratio.
-- `knapsack`: Solves the exact knapsack problem maximizing approval counts.
+Threshold approval aggregates ballots using the **greedy approval-to-cost ratio** rule (`approvals / cost`) with skip logic, following the canonical theoretical formulation of Benadè et al. (Theorem 14).
 
 ### Choose the utility distribution
 
@@ -145,7 +142,7 @@ src/pb_distortion/
   formats/knapsack.py       Knapsack ballot elicitation
   formats/threshold_approval.py Threshold approval ballot elicitation
   rules/greedy_approval.py  Greedy approval-count aggregation
-  rules/threshold_approval.py Threshold approval aggregation (count, cost_ratio, knapsack)
+  rules/threshold_approval.py Threshold approval greedy cost-ratio aggregation
   solvers.py                Exact integer-cost knapsack dynamic program
   metrics.py                Welfare and sampled distortion
   simulation.py             Election runner and trial output

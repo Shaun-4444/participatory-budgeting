@@ -81,7 +81,7 @@ where `epsilon` is a standard-normal draw. The multiplier has mean one. Noise do
 - **`src/pb_distortion/formats/knapsack.py`** — `KnapsackBallotFormat.elicit(...)` solves an exact knapsack problem using the voter’s perceived value vector. The returned ballot is a `frozenset` of project IDs.
 - **`src/pb_distortion/formats/threshold_approval.py`** — `ThresholdApprovalBallotFormat.elicit(...)` approves each project where perceived utility meets or exceeds a threshold (defaulting dynamically to $1/m$, following Benadè et al. Theorem 14). The returned ballot is a `frozenset` of approved project IDs.
 - **`src/pb_distortion/rules/greedy_approval.py`** — `GreedyApprovalRule` counts project appearances in knapsack ballots, orders projects by decreasing count, then project ID, and funds each project that fits. If a project does not fit the remaining budget, it skips that project and continues. Projects with zero approvals remain eligible at the bottom of the order.
-- **`src/pb_distortion/rules/threshold_approval.py`** — `ThresholdApprovalRule` aggregates threshold approval ballots. Unlike knapsack ballots, submitted ballots are not constrained by individual budget feasibility. Supports `'count'` (default greedy approval with skip), `'cost_ratio'` (greedy approval/cost ratio with skip), and `'knapsack'` (exact 0/1 knapsack dynamic program on approval counts).
+- **`src/pb_distortion/rules/threshold_approval.py`** — `ThresholdApprovalRule` aggregates threshold approval ballots using greedy approval-to-cost ratio (`approvals / cost`) with skip logic (Theorem 14 of Benadè et al.). Unlike knapsack ballots, submitted ballots are not constrained by individual budget feasibility.
 
 ### Optimization and metrics
 

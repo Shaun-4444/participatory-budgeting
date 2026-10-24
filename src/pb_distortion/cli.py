@@ -150,12 +150,6 @@ def main() -> None:
         default=None,
         help="Approval threshold for threshold_approval format (default: 1/m).",
     )
-    parser.add_argument(
-        "--approval-mode",
-        choices=("count", "cost_ratio", "knapsack"),
-        default="count",
-        help="Aggregation ordering for threshold approval (default: count).",
-    )
     arguments = parser.parse_args()
     if arguments.noise_sigma is not None and arguments.noise_sigmas is not None:
         parser.error("Choose either --noise-sigma or --noise-sigmas, not both.")
@@ -174,7 +168,7 @@ def main() -> None:
 
     if arguments.ballot_format == "threshold_approval":
         ballot_format = ThresholdApprovalBallotFormat(threshold=arguments.threshold)
-        aggregation_rule = ThresholdApprovalRule(mode=arguments.approval_mode)
+        aggregation_rule = ThresholdApprovalRule()
     else:
         ballot_format = KnapsackBallotFormat()
         aggregation_rule = GreedyApprovalRule()
