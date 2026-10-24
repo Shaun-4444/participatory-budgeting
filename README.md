@@ -116,7 +116,12 @@ The repository includes a Pabulib loader and a model-based experiment for the
 Amsterdam Centrum 2020 dataset:
 
 ```bash
+# Compare both Knapsack and Threshold Approval side-by-side (default)
 uv run pb-distortion-pabulib --config configs/pabulib_amsterdam.toml
+
+# Or run a specific format:
+uv run pb-distortion-pabulib --config configs/pabulib_amsterdam.toml --format threshold_approval
+uv run pb-distortion-pabulib --config configs/pabulib_amsterdam.toml --format knapsack
 ```
 
 The loader checks that the file contains approval ballots with a finite
@@ -150,8 +155,7 @@ The dataset also has neighborhood-specific budget caps and an official
 `greedy-custom` outcome. This experiment follows the paper's single-budget
 knapsack model, so it does not enforce those neighborhood caps or reproduce
 the official outcome. Its distortion is evaluated on sampled utilities, not
-unobserved true utilities. Only the knapsack format is currently implemented;
-additional format modules can use the same sweep runner once added.
+unobserved true utilities. The runner evaluates all selected formats (`knapsack`, `threshold_approval`, or both via `all`) on the identical inferred utilities and project subsets.
 
 The run writes `trials.csv`, `summary.csv`, `run.json`, and
 `distortion_by_project_count.svg` in a new folder under `outputs/pabulib/`.
