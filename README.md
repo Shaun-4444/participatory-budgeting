@@ -4,10 +4,11 @@ This repository is a reproducible simulation project for studying how ballot for
 
 The reported quantity is the **sampled-instance distortion**
 
-\[
+$$
+\text{distortion} =
 \frac{\text{optimal feasible welfare under the generated true utilities}}
      {\text{welfare of the outcome selected from submitted ballots}}.
-\]
+$$
 
 This is an empirical ratio on a generated election. It is not the paper’s formal worst-case distortion over all utility profiles consistent with a ballot profile.
 
@@ -109,6 +110,54 @@ uv run pb-distortion --config configs/project_count_sweep.toml --distribution un
 
 High σ values are stress tests; floating-point arithmetic can underflow at extreme values. The implementation raises an error if a perturbation produces non-finite values.
 
+### Pabulib Amsterdam real-data-informed project-count sweep
+
+The repository includes a Pabulib loader and a model-based experiment for the
+Amsterdam Centrum 2020 dataset:
+
+```bash
+uv run pb-distortion-pabulib --config configs/pabulib_amsterdam.toml
+```
+
+The loader checks that the file contains approval ballots with a finite
+`max_sum_cost` equal to the election budget, then verifies every recorded
+ballot is cost-feasible. For this file, the source election has 85 projects,
+8,520 voters, and a €500,000 budget. The configuration samples 20 voter
+subprofiles of 5 voters, with 5 utility-profile draws per subprofile, using
+seed 42.
+
+Observed knapsack ballots do not reveal cardinal utilities. For each sampled
+voter, the experiment finds a nonnegative additive utility vector that sums to
+one and makes the recorded bundle utility-maximizing under the original
+budget. It uses `scipy.optimize.linprog` and adds violated-bundle constraints
+with an exact knapsack oracle. Each random LP vertex is blended with a
+Dirichlet utility vector supported on the submitted bundle (75% witness by
+default). This is a documented, non-uniform model of latent utilities, not a
+uniform draw from the consistent-utility region.
+
+For each sampled utility profile, the sweep uses nested random subsets of 5,
+10, 20, 30, 40, 50, 75, and 85 projects. It preserves the source election's
+budget-to-total-project-cost ratio for each subset, re-elicits knapsack
+ballots from the sampled utilities, and applies the existing greedy approval
+rule. The social optimum is computed exactly after dividing costs and budget
+by their common divisor. Error bars are 95% percentile-bootstrap intervals
+over voter subprofiles, keeping a subprofile's utility draws clustered.
+
+This experiment produces a **model-based counterfactual** project-count curve
+informed by the real election. The lower project-count points are not separate
+recorded Pabulib elections: they use project subsets and re-elicited ballots.
+The dataset also has neighborhood-specific budget caps and an official
+`greedy-custom` outcome. This experiment follows the paper's single-budget
+knapsack model, so it does not enforce those neighborhood caps or reproduce
+the official outcome. Its distortion is evaluated on sampled utilities, not
+unobserved true utilities. Only the knapsack format is currently implemented;
+additional format modules can use the same sweep runner once added.
+
+The run writes `trials.csv`, `summary.csv`, `run.json`, and
+`distortion_by_project_count.svg` in a new folder under `outputs/pabulib/`.
+The configured project counts and sampling settings can be changed in
+`configs/pabulib_amsterdam.toml`.
+
 ### Output location and no-overwrite behavior
 
 Each invocation creates a new folder under the configured output directory. The folder name includes the selected distribution, σ, and seed. Repeating the same run adds a numbered suffix rather than replacing prior results. Override the base output location with:
@@ -156,9 +205,9 @@ AGENTS.md                   Instructions for coding agents working in this repos
 
 ## Current scope and next stages
 
-Implemented: synthetic data, the knapsack ballot, greedy approval, exact welfare benchmarks, distribution choice, noise stress tests, project-count sweeps, confidence intervals, and output plotting.
+Implemented: synthetic data, the knapsack ballot, greedy approval, exact welfare benchmarks, distribution choice, noise stress tests, synthetic project-count sweeps, confidence intervals, Pabulib approval-knapsack loading, model-based utility sampling, and a real-data-informed project-count sweep.
 
-Planned extensions: value-ranking, value-for-money ranking, threshold approval, Pabulib ballot parsing and model-based utility analysis, and optional strategic voting. The current repository does not yet implement those formats or real-data experiments.
+Planned extensions: value-ranking, value-for-money ranking, threshold approval, alternative utility-inference assumptions for Pabulib, enforcement of dataset-specific constraints where appropriate, and optional strategic voting. The current repository has only one ballot/rule pair, so the Pabulib plot currently contains a single curve.
 
 ## Team workflow
 
