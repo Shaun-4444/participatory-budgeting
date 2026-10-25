@@ -20,6 +20,7 @@ from pb_distortion.plotting import plot_distortion_summary
 from pb_distortion.protocols import AggregationRule, ElicitationFormat
 from pb_distortion.rules.greedy_approval import GreedyApprovalRule
 from pb_distortion.rules.threshold_approval import ThresholdApprovalRule
+from pb_distortion.threshold_validation import learn_threshold_pabulib
 
 
 def _read_config(path: Path) -> dict[str, Any]:
@@ -54,7 +55,28 @@ def main() -> None:
         "--threshold",
         type=float,
         default=None,
-        help="Approval threshold for threshold_approval format (default: 1/m).",
+        help="Approval threshold for threshold_approval format (default: learned via validation).",
+    )
+    parser.add_argument(
+        "--threshold-selection",
+        choices=("validation", "fixed", "dynamic_1_over_m"),
+        default=None,
+        help=(
+            "Method to select approval threshold: 'validation' (learns on holdout set), "
+            "'fixed' (uses --threshold), or 'dynamic_1_over_m' (1/m). "
+            "Defaults to 'validation' if --threshold is not specified, otherwise 'fixed'."
+        ),
+    )
+    parser.add_argument(
+        "--validation-subprofiles",
+        type=int,
+        default=5,
+        help="Number of holdout subprofiles for threshold validation (default: 5).",
+    )
+    parser.add_argument(
+        "--per-project-count-threshold",
+        action="store_true",
+        help="If set with validation, learn a separate optimal threshold for each project count.",
     )
     arguments = parser.parse_args()
 
@@ -93,18 +115,56 @@ def main() -> None:
     election = load_pabulib_knapsack(dataset_path)
 
     format_rules: list[tuple[ElicitationFormat[Any], AggregationRule[Any]]] = []
+    extra_metadata: dict[str, Any] = {}
     if arguments.ballot_format in ("all", "knapsack"):
         format_rules.append((KnapsackBallotFormat(), GreedyApprovalRule()))
     if arguments.ballot_format in ("all", "threshold_approval"):
-        format_rules.append(
-            (
-                ThresholdApprovalBallotFormat(
-                    threshold=arguments.threshold,
-                    relative=True,
-                ),
-                ThresholdApprovalRule(),
+        thresh_mode = arguments.threshold_selection
+        if thresh_mode is None:
+            thresh_mode = "fixed" if arguments.threshold is not None else "validation"
+
+        if thresh_mode == "validation":
+            print("==================================================================")
+            print(f"Threshold Validation Phase (Holdout set: {arguments.validation_subprofiles} subprofiles)")
+            print("==================================================================")
+            print("Evaluating candidate thresholds on holdout data to learn optimal threshold...")
+            val_result = learn_threshold_pabulib(
+                election,
+                settings,
+                validation_subprofiles=arguments.validation_subprofiles,
+                per_project_count=arguments.per_project_count_threshold,
             )
-        )
+            print("Validation Results:")
+            for t_cand, dist_val in val_result.validation_distortions.items():
+                marker = " <-- BEST" if t_cand == val_result.selected_threshold else ""
+                print(f"  t={t_cand:.3f}: validation distortion={dist_val:.4f}{marker}")
+
+            if arguments.per_project_count_threshold and val_result.per_project_count_thresholds:
+                print("Learned optimal thresholds per project count:")
+                for m_count, t_m in sorted(val_result.per_project_count_thresholds.items()):
+                    print(f"  m={m_count}: t*={t_m:.3f}")
+                selected_thresh = val_result.per_project_count_thresholds
+            else:
+                print(
+                    f"Learned optimal threshold t* = {val_result.selected_threshold:.3f} "
+                    f"(validation distortion: {val_result.best_validation_distortion:.4f})"
+                )
+                selected_thresh = val_result.selected_threshold
+
+            ta_format = ThresholdApprovalBallotFormat(
+                threshold=selected_thresh,
+                relative=True,
+            )
+            extra_metadata["threshold_validation"] = val_result.to_metadata_dict()
+        elif thresh_mode == "dynamic_1_over_m":
+            ta_format = ThresholdApprovalBallotFormat(threshold=None, relative=True)
+        else:  # fixed
+            ta_format = ThresholdApprovalBallotFormat(
+                threshold=arguments.threshold,
+                relative=True,
+            )
+
+        format_rules.append((ta_format, ThresholdApprovalRule()))
 
     print(
         f"Loaded {election.metadata.get('description', election.source_path.name)}: "
@@ -135,6 +195,7 @@ def main() -> None:
         summaries,
         diagnostics,
         output_directory,
+        extra_metadata=extra_metadata,
     )
 
     means: dict[str, list[float]] = {}
