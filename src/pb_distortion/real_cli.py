@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pb_distortion.formats.knapsack import KnapsackBallotFormat
+from pb_distortion.formats.threshold_approval import ThresholdApprovalBallotFormat
 from pb_distortion.pabulib_data import load_pabulib_knapsack
 from pb_distortion.pabulib_sweep import (
     PabulibSweepSettings,
@@ -16,7 +17,9 @@ from pb_distortion.pabulib_sweep import (
     write_pabulib_sweep_outputs,
 )
 from pb_distortion.plotting import plot_distortion_summary
+from pb_distortion.protocols import AggregationRule, ElicitationFormat
 from pb_distortion.rules.greedy_approval import GreedyApprovalRule
+from pb_distortion.rules.threshold_approval import ThresholdApprovalRule
 
 
 def _read_config(path: Path) -> dict[str, Any]:
@@ -39,6 +42,20 @@ def main() -> None:
     parser.add_argument("--dataset", help="Override the .pb path from the config.")
     parser.add_argument("--output", help="Override the output base directory.")
     parser.add_argument("--seed", type=int, help="Override the master seed.")
+    parser.add_argument(
+        "--format",
+        "--ballot-format",
+        dest="ballot_format",
+        choices=("all", "threshold_approval", "knapsack"),
+        default="all",
+        help="Select ballot format(s) to evaluate: 'all' (both), 'threshold_approval', or 'knapsack' (default: all).",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Approval threshold for threshold_approval format (default: 1/m).",
+    )
     arguments = parser.parse_args()
 
     config_path = Path(arguments.config).expanduser().resolve()
@@ -74,8 +91,21 @@ def main() -> None:
         output_base = repository_root / output_base
 
     election = load_pabulib_knapsack(dataset_path)
-    ballot_format = KnapsackBallotFormat()
-    aggregation_rule = GreedyApprovalRule()
+
+    format_rules: list[tuple[ElicitationFormat[Any], AggregationRule[Any]]] = []
+    if arguments.ballot_format in ("all", "knapsack"):
+        format_rules.append((KnapsackBallotFormat(), GreedyApprovalRule()))
+    if arguments.ballot_format in ("all", "threshold_approval"):
+        format_rules.append(
+            (
+                ThresholdApprovalBallotFormat(
+                    threshold=arguments.threshold,
+                    relative=True,
+                ),
+                ThresholdApprovalRule(),
+            )
+        )
+
     print(
         f"Loaded {election.metadata.get('description', election.source_path.name)}: "
         f"{election.voter_count:,} voters, {election.project_count} projects, "
@@ -88,7 +118,7 @@ def main() -> None:
     results, summaries, diagnostics = run_pabulib_project_count_sweep(
         election,
         settings,
-        [(ballot_format, aggregation_rule)],
+        format_rules,
     )
 
     output_directory = allocate_pabulib_output_directory(
@@ -107,13 +137,19 @@ def main() -> None:
         output_directory,
     )
 
-    curve_name = f"{ballot_format.name} + {aggregation_rule.name}"
-    summary_by_count = {
-        summary.project_count: summary for summary in summaries
-    }
-    means = {curve_name: [summary_by_count[m].mean_distortion for m in settings.project_counts]}
-    errors = {
-        curve_name: (
+    means: dict[str, list[float]] = {}
+    errors: dict[str, tuple[list[float], list[float]]] = {}
+    for fmt, rule in format_rules:
+        curve_name = f"{fmt.name} + {rule.name}"
+        summary_by_count = {
+            summary.project_count: summary
+            for summary in summaries
+            if summary.format_name == curve_name
+        }
+        means[curve_name] = [
+            summary_by_count[m].mean_distortion for m in settings.project_counts
+        ]
+        errors[curve_name] = (
             [
                 summary_by_count[m].mean_distortion - summary_by_count[m].ci_lower
                 for m in settings.project_counts
@@ -123,7 +159,7 @@ def main() -> None:
                 for m in settings.project_counts
             ],
         )
-    }
+
     plot_path = plot_distortion_summary(
         settings.project_counts,
         means,
@@ -139,7 +175,8 @@ def main() -> None:
     print(f"Utility inference: {diagnostics}")
     for summary in summaries:
         print(
-            f"m={summary.project_count}: mean distortion={summary.mean_distortion:.6f} "
+            f"[{summary.format_name}] m={summary.project_count}: "
+            f"mean distortion={summary.mean_distortion:.6f} "
             f"({settings.confidence_level:.0%} CI {summary.ci_lower:.6f} "
             f"to {summary.ci_upper:.6f})"
         )

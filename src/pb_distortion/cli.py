@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from pb_distortion.formats.knapsack import KnapsackBallotFormat
+from pb_distortion.formats.threshold_approval import ThresholdApprovalBallotFormat
 from pb_distortion.plotting import plot_distortion_summary
 from pb_distortion.rules.greedy_approval import GreedyApprovalRule
+from pb_distortion.rules.threshold_approval import ThresholdApprovalRule
 from pb_distortion.simulation import SimulationSettings, run_simulation, write_simulation_outputs
 from pb_distortion.sweeps import (
     run_noise_sweep,
@@ -134,6 +136,20 @@ def main() -> None:
         metavar="SIGMA",
         help="Run a separate project-count sweep at each sigma and plot them together.",
     )
+    parser.add_argument(
+        "--format",
+        "--ballot-format",
+        dest="ballot_format",
+        choices=("knapsack", "threshold_approval"),
+        default="knapsack",
+        help="Select the ballot format and aggregation rule (default: knapsack).",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Approval threshold for threshold_approval format (default: 1/m).",
+    )
     arguments = parser.parse_args()
     if arguments.noise_sigma is not None and arguments.noise_sigmas is not None:
         parser.error("Choose either --noise-sigma or --noise-sigmas, not both.")
@@ -150,8 +166,12 @@ def main() -> None:
     if not output_base_directory.is_absolute():
         output_base_directory = config_path.parent.parent / output_base_directory
 
-    ballot_format = KnapsackBallotFormat()
-    aggregation_rule = GreedyApprovalRule()
+    if arguments.ballot_format == "threshold_approval":
+        ballot_format = ThresholdApprovalBallotFormat(threshold=arguments.threshold)
+        aggregation_rule = ThresholdApprovalRule()
+    else:
+        ballot_format = KnapsackBallotFormat()
+        aggregation_rule = GreedyApprovalRule()
     project_counts = config["instance"].get("project_counts")
     analysis_config = config.get("analysis", {})
     bootstrap_resamples = int(analysis_config.get("bootstrap_resamples", 2000))
