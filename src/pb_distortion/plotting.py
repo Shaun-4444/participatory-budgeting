@@ -14,6 +14,7 @@ def _write_svg_plot(
     destination: Path,
     title: str,
     x_label: str = "Number of projects",
+    x_ticks: Sequence[int | float] | None = None,
 ) -> None:
     """Write a self-contained vector plot without an optional plotting runtime."""
 
@@ -40,8 +41,9 @@ def _write_svg_plot(
     y_max = data_max + 0.10 * max(data_max - y_min, 0.05)
     if y_max <= y_min:
         y_max = y_min + 0.1
-    x_min = min(x_values)
-    x_max = max(x_values)
+    all_x = list(x_values) + (list(x_ticks) if x_ticks is not None else [])
+    x_min = min(all_x)
+    x_max = max(all_x)
     if x_min == x_max:
         x_min -= 1
         x_max += 1
@@ -73,7 +75,8 @@ def _write_svg_plot(
         ]
     )
 
-    for val in x_values:
+    ticks_to_draw = x_ticks if x_ticks is not None else x_values
+    for val in ticks_to_draw:
         x = x_position(val)
         parts.append(f'<line class="axis" x1="{x:.2f}" y1="{plot_bottom}" x2="{x:.2f}" y2="{plot_bottom + 5}"/>')
         label = f"{val:.2f}" if isinstance(val, float) else str(val)
@@ -117,6 +120,7 @@ def plot_distortion_summary(
     *,
     title: str = "Distortion by project count",
     x_label: str = "Number of projects",
+    x_ticks: Sequence[int | float] | None = None,
 ) -> Path:
     """Plot means with caller-provided error bars for each ballot format."""
 
@@ -143,7 +147,15 @@ def plot_distortion_summary(
 
     destination = Path(output_path)
     if destination.suffix.lower() == ".svg":
-        _write_svg_plot(project_counts, means, errors, destination, title, x_label=x_label)
+        _write_svg_plot(
+            project_counts,
+            means,
+            errors,
+            destination,
+            title,
+            x_label=x_label,
+            x_ticks=x_ticks,
+        )
         return destination
 
     import matplotlib.pyplot as plt
@@ -162,6 +174,8 @@ def plot_distortion_summary(
     axis.set_ylabel("Distortion (lower is better)")
     axis.set_ylim(bottom=1.0)
     axis.set_title(title)
+    if x_ticks is not None:
+        axis.set_xticks(x_ticks)
     axis.grid(True, alpha=0.25)
     axis.legend()
     figure.tight_layout()

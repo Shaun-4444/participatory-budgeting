@@ -1,14 +1,18 @@
-"""Run threshold sweeps for synthetic and real Pabulib datasets, mirroring Figure 4 of Benade et al."""
+"""Run extended threshold sweeps for synthetic and real Pabulib datasets.
+
+Mirroring and extending Figure 4 of Benadè et al. (2021) to explore higher thresholds (up to 0.90)
+and compare threshold approval directly against the knapsack benchmark.
+"""
 
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from pb_distortion.formats.knapsack import KnapsackBallotFormat
 from pb_distortion.formats.threshold_approval import ThresholdApprovalBallotFormat
 from pb_distortion.pabulib_data import load_pabulib_knapsack
 from pb_distortion.pabulib_sweep import (
@@ -16,8 +20,38 @@ from pb_distortion.pabulib_sweep import (
     run_pabulib_project_count_sweep,
 )
 from pb_distortion.plotting import plot_distortion_summary
+from pb_distortion.rules.greedy_approval import GreedyApprovalRule
 from pb_distortion.rules.threshold_approval import ThresholdApprovalRule
 from pb_distortion.simulation import SimulationSettings, run_simulation
+
+
+def run_synthetic_benchmark(
+    m: int = 10,
+    distribution: str = "uniform",
+    trials: int = 200,
+    master_seed: int = 42,
+    bootstrap_resamples: int = 2000,
+    confidence_level: float = 0.95,
+) -> tuple[float, float, float]:
+    settings = SimulationSettings(
+        trials=trials,
+        master_seed=master_seed,
+        project_count=m,
+        voter_count=50,
+        cost_min=1,
+        cost_max=10,
+        budget_fraction=0.33,
+        utility_distribution=distribution,
+        noise_sigma=0.0,
+    )
+    results = run_simulation(settings, KnapsackBallotFormat(), GreedyApprovalRule())
+    values = np.asarray([r.distortion for r in results], dtype=np.float64)
+    rng = np.random.default_rng(np.random.SeedSequence([master_seed, 9999]))
+    indices = rng.integers(0, len(values), size=(bootstrap_resamples, len(values)))
+    boot_means = values[indices].mean(axis=1)
+    alpha = (1 - confidence_level) / 2
+    lower, upper = np.quantile(boot_means, [alpha, 1 - alpha])
+    return float(values.mean()), float(lower), float(upper)
 
 
 def run_synthetic_threshold_sweep(
@@ -51,7 +85,6 @@ def run_synthetic_threshold_sweep(
         values = np.asarray([r.distortion for r in results], dtype=np.float64)
 
         mean_val = float(values.mean())
-        # Bootstrap CI
         rng = np.random.default_rng(np.random.SeedSequence([master_seed, int(t * 1000)]))
         indices = rng.integers(0, len(values), size=(bootstrap_resamples, len(values)))
         boot_means = values[indices].mean(axis=1)
@@ -69,16 +102,24 @@ def main() -> None:
     output_base = Path("outputs/threshold_sweeps")
     output_base.mkdir(parents=True, exist_ok=True)
 
-    # Threshold grid mirroring Figure 4 of Benade et al. (2021)
-    thresholds = [0.02, 0.05, 0.075, 0.10, 0.125, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40]
-    m = 10  # Canonical project count from paper (Boston 10 alternatives)
+    # Extended threshold grid up to 0.90
+    thresholds = [
+        0.02, 0.05, 0.075, 0.10, 0.125, 0.15, 0.20,
+        0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.60,
+        0.70, 0.80, 0.90,
+    ]
+    x_ticks = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    m = 10  # Canonical project count from paper
 
+    # 1. Synthetic Uniform
     print("==================================================================")
-    print("1. Running Synthetic Uniform Threshold Sweep (m=10, 200 trials)...")
+    print("1. Running Synthetic Uniform Sweep (m=10, 200 trials)...")
     print("==================================================================")
     synth_u_means, synth_u_lowers, synth_u_uppers = run_synthetic_threshold_sweep(
         thresholds, m=m, distribution="uniform"
     )
+    kn_u_mean, kn_u_lower, kn_u_upper = run_synthetic_benchmark(m=m, distribution="uniform")
+    print(f"Uniform Knapsack benchmark: {kn_u_mean:.4f} [{kn_u_lower:.4f}, {kn_u_upper:.4f}]")
 
     u_dir = output_base / "synthetic_uniform_m10"
     u_dir.mkdir(parents=True, exist_ok=True)
@@ -90,25 +131,36 @@ def main() -> None:
 
     plot_distortion_summary(
         thresholds,
-        {"Threshold Approval (Uniform, m=10)": synth_u_means},
+        {
+            "Threshold Approval (Uniform, m=10)": synth_u_means,
+            "Knapsack Benchmark (Uniform, m=10)": [kn_u_mean] * len(thresholds),
+        },
         {
             "Threshold Approval (Uniform, m=10)": (
-                [m - l for m, l in zip(synth_u_means, synth_u_lowers, strict=True)],
-                [u - m for m, u in zip(synth_u_means, synth_u_uppers, strict=True)],
-            )
+                [m_val - l for m_val, l in zip(synth_u_means, synth_u_lowers, strict=True)],
+                [u - m_val for m_val, u in zip(synth_u_means, synth_u_uppers, strict=True)],
+            ),
+            "Knapsack Benchmark (Uniform, m=10)": (
+                [kn_u_mean - kn_u_lower] * len(thresholds),
+                [kn_u_upper - kn_u_mean] * len(thresholds),
+            ),
         },
         u_dir / "distortion_by_threshold.svg",
         title=f"Synthetic Uniform: Distortion vs. Threshold (m={m}; 95% bootstrap CI)",
         x_label="Threshold value (t)",
+        x_ticks=x_ticks,
     )
     print(f"Saved: {u_dir / 'distortion_by_threshold.svg'}")
 
+    # 2. Synthetic Normal
     print("\n==================================================================")
-    print("2. Running Synthetic Normal Threshold Sweep (m=10, 200 trials)...")
+    print("2. Running Synthetic Normal Sweep (m=10, 200 trials)...")
     print("==================================================================")
     synth_n_means, synth_n_lowers, synth_n_uppers = run_synthetic_threshold_sweep(
         thresholds, m=m, distribution="normal"
     )
+    kn_n_mean, kn_n_lower, kn_n_upper = run_synthetic_benchmark(m=m, distribution="normal")
+    print(f"Normal Knapsack benchmark: {kn_n_mean:.4f} [{kn_n_lower:.4f}, {kn_n_upper:.4f}]")
 
     n_dir = output_base / "synthetic_normal_m10"
     n_dir.mkdir(parents=True, exist_ok=True)
@@ -120,21 +172,30 @@ def main() -> None:
 
     plot_distortion_summary(
         thresholds,
-        {"Threshold Approval (Normal, m=10)": synth_n_means},
+        {
+            "Threshold Approval (Normal, m=10)": synth_n_means,
+            "Knapsack Benchmark (Normal, m=10)": [kn_n_mean] * len(thresholds),
+        },
         {
             "Threshold Approval (Normal, m=10)": (
-                [m - l for m, l in zip(synth_n_means, synth_n_lowers, strict=True)],
-                [u - m for m, u in zip(synth_n_means, synth_n_uppers, strict=True)],
-            )
+                [m_val - l for m_val, l in zip(synth_n_means, synth_n_lowers, strict=True)],
+                [u - m_val for m_val, u in zip(synth_n_means, synth_n_uppers, strict=True)],
+            ),
+            "Knapsack Benchmark (Normal, m=10)": (
+                [kn_n_mean - kn_n_lower] * len(thresholds),
+                [kn_n_upper - kn_n_mean] * len(thresholds),
+            ),
         },
         n_dir / "distortion_by_threshold.svg",
         title=f"Synthetic Normal: Distortion vs. Threshold (m={m}; 95% bootstrap CI)",
         x_label="Threshold value (t)",
+        x_ticks=x_ticks,
     )
     print(f"Saved: {n_dir / 'distortion_by_threshold.svg'}")
 
+    # 3. Real Pabulib Amsterdam Centrum 2020
     print("\n==================================================================")
-    print("3. Running Real Pabulib Amsterdam Threshold Sweep (m=10)...")
+    print("3. Running Real Pabulib Amsterdam Extended Threshold Sweep (m=10)...")
     print("==================================================================")
     election = load_pabulib_knapsack("data/Netherlands_Amsterdam_2020_Centrum.pb")
     pabulib_settings = PabulibSweepSettings(
@@ -144,9 +205,11 @@ def main() -> None:
         utility_profiles_per_subprofile=5,
         utility_witness_mix=0.75,
         master_seed=42,
-        bootstrap_resamples=2000,
     )
-    format_rules = [
+
+    format_rules: list[tuple[Any, Any]] = [
+        (KnapsackBallotFormat(), GreedyApprovalRule()),
+    ] + [
         (
             ThresholdApprovalBallotFormat(
                 name=f"t_{t:.3f}",
@@ -162,10 +225,16 @@ def main() -> None:
         election, pabulib_settings, format_rules
     )
 
-    summary_by_thresh = {s.format_name.split(" + ")[0]: s for s in p_summaries}
-    pab_means = [summary_by_thresh[f"t_{t:.3f}"].mean_distortion for t in thresholds]
-    pab_lowers = [summary_by_thresh[f"t_{t:.3f}"].ci_lower for t in thresholds]
-    pab_uppers = [summary_by_thresh[f"t_{t:.3f}"].ci_upper for t in thresholds]
+    summary_by_label = {s.format_name: s for s in p_summaries}
+    kn_amsterdam_sum = summary_by_label["knapsack + greedy_approval"]
+    kn_pab_mean = kn_amsterdam_sum.mean_distortion
+    kn_pab_lower = kn_amsterdam_sum.ci_lower
+    kn_pab_upper = kn_amsterdam_sum.ci_upper
+    print(f"Amsterdam Knapsack benchmark: {kn_pab_mean:.4f} [{kn_pab_lower:.4f}, {kn_pab_upper:.4f}]")
+
+    pab_means = [summary_by_label[f"t_{t:.3f} + threshold_approval"].mean_distortion for t in thresholds]
+    pab_lowers = [summary_by_label[f"t_{t:.3f} + threshold_approval"].ci_lower for t in thresholds]
+    pab_uppers = [summary_by_label[f"t_{t:.3f} + threshold_approval"].ci_upper for t in thresholds]
 
     p_dir = output_base / "pabulib_amsterdam_m10"
     p_dir.mkdir(parents=True, exist_ok=True)
@@ -177,19 +246,28 @@ def main() -> None:
 
     plot_distortion_summary(
         thresholds,
-        {"Threshold Approval (Amsterdam 2020, m=10)": pab_means},
+        {
+            "Threshold Approval (Amsterdam 2020, m=10)": pab_means,
+            "Knapsack Benchmark (Amsterdam 2020, m=10)": [kn_pab_mean] * len(thresholds),
+        },
         {
             "Threshold Approval (Amsterdam 2020, m=10)": (
-                [m - l for m, l in zip(pab_means, pab_lowers, strict=True)],
-                [u - m for m, u in zip(pab_means, pab_uppers, strict=True)],
-            )
+                [m_val - l for m_val, l in zip(pab_means, pab_lowers, strict=True)],
+                [u - m_val for m_val, u in zip(pab_means, pab_uppers, strict=True)],
+            ),
+            "Knapsack Benchmark (Amsterdam 2020, m=10)": (
+                [kn_pab_mean - kn_pab_lower] * len(thresholds),
+                [kn_pab_upper - kn_pab_mean] * len(thresholds),
+            ),
         },
         p_dir / "distortion_by_threshold.svg",
         title=f"Amsterdam Centrum 2020: Distortion vs. Threshold (m={m}; 95% cluster CI)",
         x_label="Threshold value (t)",
+        x_ticks=x_ticks,
     )
     print(f"Saved: {p_dir / 'distortion_by_threshold.svg'}")
 
+    # 4. Multi-dataset comparison plot
     print("\n==================================================================")
     print("4. Generating Multi-Dataset Comparison Plot...")
     print("==================================================================")
@@ -200,16 +278,16 @@ def main() -> None:
     }
     errors_dict = {
         "Synthetic Uniform (m=10)": (
-            [m - l for m, l in zip(synth_u_means, synth_u_lowers, strict=True)],
-            [u - m for m, u in zip(synth_u_means, synth_u_uppers, strict=True)],
+            [m_val - l for m_val, l in zip(synth_u_means, synth_u_lowers, strict=True)],
+            [u - m_val for m_val, u in zip(synth_u_means, synth_u_uppers, strict=True)],
         ),
         "Synthetic Normal (m=10)": (
-            [m - l for m, l in zip(synth_n_means, synth_n_lowers, strict=True)],
-            [u - m for m, u in zip(synth_n_means, synth_n_uppers, strict=True)],
+            [m_val - l for m_val, l in zip(synth_n_means, synth_n_lowers, strict=True)],
+            [u - m_val for m_val, u in zip(synth_n_means, synth_n_uppers, strict=True)],
         ),
         "Amsterdam Centrum (m=10)": (
-            [m - l for m, l in zip(pab_means, pab_lowers, strict=True)],
-            [u - m for m, u in zip(pab_means, pab_uppers, strict=True)],
+            [m_val - l for m_val, l in zip(pab_means, pab_lowers, strict=True)],
+            [u - m_val for m_val, u in zip(pab_means, pab_uppers, strict=True)],
         ),
     }
 
@@ -221,10 +299,11 @@ def main() -> None:
         comp_plot,
         title="Distortion vs. Approval Threshold t (Synthetic & Real Amsterdam, m=10)",
         x_label="Threshold value (t)",
+        x_ticks=x_ticks,
     )
     print(f"Saved comparison plot: {comp_plot}")
 
-    print("\nAll threshold experiments completed successfully!")
+    print("\nAll extended threshold experiments completed successfully!")
 
 
 if __name__ == "__main__":
