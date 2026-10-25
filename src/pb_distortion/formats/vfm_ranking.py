@@ -1,7 +1,8 @@
-"""Value-for-money ranking ballot format: voters rank all projects by u_i(j) / c_j.
+"""Value-for-money ranking ballot format: voters rank projects by u_i(j) / c_j.
 
-Each voter submits a strict ordinal ranking of all candidate projects in descending
-order of perceived value-for-money (utility per unit cost). Ties are broken
+Each voter submits a strict ordinal ranking of candidate projects in descending
+order of perceived value-for-money (utility per unit cost) for all projects with
+positive utility u_i(j) > 0. Projects with zero utility are unranked. Ties are broken
 deterministically by ascending project ID. Only ordinal ordering is retained;
 cardinal magnitudes are discarded.
 
@@ -24,10 +25,11 @@ VFMRankingBallot = tuple[str, ...]
 
 @dataclass(frozen=True, slots=True)
 class VFMRankingFormat:
-    """Elicit a ranking of all projects by value-for-money u_i(j)/c_j, highest first.
+    """Elicit a ranking of projects by value-for-money u_i(j)/c_j, highest first.
 
-    The returned ballot is an ordered tuple of all project IDs in descending bang-per-buck order.
-    Ties are broken by ascending project ID for full determinism.
+    The returned ballot is an ordered tuple of project IDs in descending bang-per-buck
+    order for projects with positive utility (u_i(j) > 0). Ties are broken by ascending
+    project ID for full determinism. Projects with zero utility are not ranked.
     """
 
     name: str = "vfm_ranking"
@@ -46,9 +48,9 @@ class VFMRankingFormat:
         costs = np.array(instance.costs, dtype=np.float64)
         vfm_scores = values / costs
         project_ids = instance.project_ids
+        positive_indices = [index for index, val in enumerate(values) if val > 0]
         ordering = sorted(
-            range(len(project_ids)),
+            positive_indices,
             key=lambda index: (-vfm_scores[index], project_ids[index]),
         )
         return tuple(project_ids[index] for index in ordering)
-

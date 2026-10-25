@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import tomllib
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 from pb_distortion.formats.knapsack import KnapsackBallotFormat
+from pb_distortion.formats.value_ranking import ValueRankingFormat
+from pb_distortion.formats.vfm_ranking import VFMRankingFormat
 from pb_distortion.pabulib_data import load_pabulib_knapsack
 from pb_distortion.pabulib_sweep import (
     PabulibSweepSettings,
@@ -17,6 +20,8 @@ from pb_distortion.pabulib_sweep import (
 )
 from pb_distortion.plotting import plot_distortion_summary
 from pb_distortion.rules.greedy_approval import GreedyApprovalRule
+from pb_distortion.rules.value_ranking import HarmonicValueRankingRule
+from pb_distortion.rules.vfm_ranking import HarmonicVFMRankingRule
 
 
 def _read_config(path: Path) -> dict[str, Any]:
@@ -39,6 +44,15 @@ def main() -> None:
     parser.add_argument("--dataset", help="Override the .pb path from the config.")
     parser.add_argument("--output", help="Override the output base directory.")
     parser.add_argument("--seed", type=int, help="Override the master seed.")
+    parser.add_argument(
+        "--ballot",
+        choices=("all", "knapsack", "value_ranking", "vfm_ranking"),
+        default="all",
+        help=(
+            "Ballot format(s) to evaluate (default: 'all' to compare Knapsack, "
+            "Value Ranking, and VFM Ranking)."
+        ),
+    )
     arguments = parser.parse_args()
 
     config_path = Path(arguments.config).expanduser().resolve()
@@ -74,21 +88,34 @@ def main() -> None:
         output_base = repository_root / output_base
 
     election = load_pabulib_knapsack(dataset_path)
-    ballot_format = KnapsackBallotFormat()
-    aggregation_rule = GreedyApprovalRule()
+
+    available_pairs = {
+        "knapsack": (KnapsackBallotFormat(), GreedyApprovalRule()),
+        "value_ranking": (ValueRankingFormat(), HarmonicValueRankingRule()),
+        "vfm_ranking": (VFMRankingFormat(), HarmonicVFMRankingRule()),
+    }
+    if arguments.ballot == "all":
+        format_rules = [
+            available_pairs["knapsack"],
+            available_pairs["value_ranking"],
+            available_pairs["vfm_ranking"],
+        ]
+    else:
+        format_rules = [available_pairs[arguments.ballot]]
+
     print(
         f"Loaded {election.metadata.get('description', election.source_path.name)}: "
         f"{election.voter_count:,} voters, {election.project_count} projects, "
         f"budget={election.metadata['budget']} {election.metadata.get('currency', '')}."
     )
     print(
-        "Sampling utility profiles consistent with observed knapsack ballots; "
+        f"Evaluating {[fmt.name for fmt, _ in format_rules]} on inferred utility profiles; "
         "this can take a few minutes."
     )
     results, summaries, diagnostics = run_pabulib_project_count_sweep(
         election,
         settings,
-        [(ballot_format, aggregation_rule)],
+        format_rules,
     )
 
     output_directory = allocate_pabulib_output_directory(
@@ -107,23 +134,26 @@ def main() -> None:
         output_directory,
     )
 
-    curve_name = f"{ballot_format.name} + {aggregation_rule.name}"
-    summary_by_count = {
-        summary.project_count: summary for summary in summaries
-    }
-    means = {curve_name: [summary_by_count[m].mean_distortion for m in settings.project_counts]}
-    errors = {
-        curve_name: (
+    summary_by_curve = defaultdict(dict)
+    for summary in summaries:
+        curve_name = summary.format_name
+        summary_by_curve[curve_name][summary.project_count] = summary
+
+    means: dict[str, list[float]] = {}
+    errors: dict[str, tuple[list[float], list[float]]] = {}
+    for curve_name, counts_dict in summary_by_curve.items():
+        means[curve_name] = [counts_dict[m].mean_distortion for m in settings.project_counts]
+        errors[curve_name] = (
             [
-                summary_by_count[m].mean_distortion - summary_by_count[m].ci_lower
+                counts_dict[m].mean_distortion - counts_dict[m].ci_lower
                 for m in settings.project_counts
             ],
             [
-                summary_by_count[m].ci_upper - summary_by_count[m].mean_distortion
+                counts_dict[m].ci_upper - counts_dict[m].mean_distortion
                 for m in settings.project_counts
             ],
         )
-    }
+
     plot_path = plot_distortion_summary(
         settings.project_counts,
         means,
@@ -136,17 +166,19 @@ def main() -> None:
         ),
     )
 
-    print(f"Utility inference: {diagnostics}")
-    for summary in summaries:
-        print(
-            f"m={summary.project_count}: mean distortion={summary.mean_distortion:.6f} "
-            f"({settings.confidence_level:.0%} CI {summary.ci_lower:.6f} "
-            f"to {summary.ci_upper:.6f})"
-        )
-    print(f"Trial results: {trial_path}")
+    print(f"Utility inference diagnostics: {diagnostics}")
+    for curve_name, counts_dict in summary_by_curve.items():
+        print(f"\n--- {curve_name} ---")
+        for m in settings.project_counts:
+            s = counts_dict[m]
+            print(
+                f"  m={s.project_count}: mean distortion={s.mean_distortion:.6f} "
+                f"({settings.confidence_level:.0%} CI {s.ci_lower:.6f} to {s.ci_upper:.6f})"
+            )
+    print(f"\nTrial results: {trial_path}")
     print(f"Summary: {summary_path}")
     print(f"Run metadata: {metadata_path}")
-    print(f"Plot: {plot_path}")
+    print(f"Comparison plot: {plot_path}")
 
 
 if __name__ == "__main__":

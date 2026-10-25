@@ -21,7 +21,7 @@ def _instance(*args: tuple[str, int], budget: int) -> PBInstance:
 
 
 class TestValueRankingFormat:
-    def test_ballot_contains_all_projects(self):
+    def test_ballot_contains_all_projects_when_all_positive(self):
         instance = _instance(("a", 2), ("b", 3), ("c", 1), budget=5)
         utilities = np.array([0.5, 0.8, 0.2])
         ballot = ValueRankingFormat().elicit(utilities, instance)
@@ -55,10 +55,16 @@ class TestValueRankingFormat:
         with pytest.raises(ValueError):
             ValueRankingFormat().elicit(np.array([-0.1, 0.5]), instance)
 
-    def test_zero_utilities_tie_broken_by_id(self):
+    def test_zero_utilities_produces_empty_ballot(self):
         instance = _instance(("c", 1), ("a", 1), ("b", 1), budget=3)
         ballot = ValueRankingFormat().elicit(np.zeros(3), instance)
-        assert ballot == ("a", "b", "c")
+        assert ballot == ()
+
+    def test_partial_positive_utilities_only_ranks_positive(self):
+        instance = _instance(("a", 1), ("b", 1), ("c", 1), budget=3)
+        utilities = np.array([0.5, 0.0, 0.2])
+        ballot = ValueRankingFormat().elicit(utilities, instance)
+        assert ballot == ("a", "c")
 
     def test_ballot_is_deterministic(self):
         instance = _instance(("a", 2), ("b", 3), ("c", 1), budget=5)
@@ -84,11 +90,25 @@ class TestHarmonicValueRankingRule:
         assert scores["a"] == pytest.approx(1.5)
         assert scores["b"] == pytest.approx(1.5)
 
-    def test_rejects_incomplete_ballot(self):
+    def test_rejects_unknown_project_in_ballot(self):
         instance = _instance(("a", 1), ("b", 2), ("c", 3), budget=6)
-        bad_ballot: ValueRankingBallot = ("a", "b")
-        with pytest.raises(ValueError, match="every project ID exactly once"):
+        bad_ballot: ValueRankingBallot = ("a", "unknown")
+        with pytest.raises(ValueError, match="unique valid project IDs"):
             HarmonicValueRankingRule().aggregate([bad_ballot], instance)
+
+    def test_rejects_duplicate_in_ballot(self):
+        instance = _instance(("a", 1), ("b", 2), ("c", 3), budget=6)
+        bad_ballot: ValueRankingBallot = ("a", "a")
+        with pytest.raises(ValueError, match="unique valid project IDs"):
+            HarmonicValueRankingRule().aggregate([bad_ballot], instance)
+
+    def test_partial_ranking_ballots_supported(self):
+        instance = _instance(("a", 1), ("b", 2), ("c", 3), budget=6)
+        ballot: ValueRankingBallot = ("b", "a")
+        scores = HarmonicValueRankingRule().harmonic_scores([ballot], instance)
+        assert scores["b"] == pytest.approx(1.0)
+        assert scores["a"] == pytest.approx(0.5)
+        assert scores["c"] == pytest.approx(0.0)
 
     def test_outcome_is_budget_feasible(self):
         instance = _instance(("a", 3), ("b", 4), ("c", 2), budget=5)

@@ -44,8 +44,8 @@ class HarmonicValueRankingRule:
         known = set(instance.project_ids)
         scores = {pid: 0.0 for pid in instance.project_ids}
         for ballot in ballots:
-            if set(ballot) != known or len(ballot) != len(known):
-                raise ValueError("A ranking ballot must contain every project ID exactly once.")
+            if not set(ballot).issubset(known) or len(ballot) != len(set(ballot)):
+                raise ValueError("A ranking ballot must contain unique valid project IDs.")
             for rank, project_id in enumerate(ballot, start=1):
                 scores[project_id] += 1.0 / rank
         return scores

@@ -55,6 +55,17 @@ class TestVFMRankingFormat:
         with pytest.raises(ValueError):
             VFMRankingFormat().elicit(np.array([-0.2, 0.5]), instance)
 
+    def test_zero_utilities_produces_empty_ballot(self):
+        instance = _instance(("c", 1), ("a", 1), ("b", 1), budget=3)
+        ballot = VFMRankingFormat().elicit(np.zeros(3), instance)
+        assert ballot == ()
+
+    def test_partial_positive_utilities_only_ranks_positive(self):
+        instance = _instance(("a", 1), ("b", 1), ("c", 1), budget=3)
+        utilities = np.array([0.5, 0.0, 0.2])
+        ballot = VFMRankingFormat().elicit(utilities, instance)
+        assert ballot == ("a", "c")
+
 
 class TestHarmonicVFMRankingRule:
     def test_harmonic_scores(self):
@@ -64,6 +75,26 @@ class TestHarmonicVFMRankingRule:
         assert scores["b"] == pytest.approx(1.0)
         assert scores["a"] == pytest.approx(0.5)
         assert scores["c"] == pytest.approx(1.0 / 3)
+
+    def test_rejects_unknown_project_in_ballot(self):
+        instance = _instance(("a", 1), ("b", 2), ("c", 3), budget=6)
+        bad_ballot: VFMRankingBallot = ("a", "unknown")
+        with pytest.raises(ValueError, match="unique valid project IDs"):
+            HarmonicVFMRankingRule().aggregate([bad_ballot], instance)
+
+    def test_rejects_duplicate_in_ballot(self):
+        instance = _instance(("a", 1), ("b", 2), ("c", 3), budget=6)
+        bad_ballot: VFMRankingBallot = ("a", "a")
+        with pytest.raises(ValueError, match="unique valid project IDs"):
+            HarmonicVFMRankingRule().aggregate([bad_ballot], instance)
+
+    def test_partial_ranking_ballots_supported(self):
+        instance = _instance(("a", 1), ("b", 2), ("c", 3), budget=6)
+        ballot: VFMRankingBallot = ("b", "a")
+        scores = HarmonicVFMRankingRule().harmonic_scores([ballot], instance)
+        assert scores["b"] == pytest.approx(1.0)
+        assert scores["a"] == pytest.approx(0.5)
+        assert scores["c"] == pytest.approx(0.0)
 
     def test_outcome_is_budget_feasible(self):
         instance = _instance(("a", 3), ("b", 4), ("c", 2), budget=5)

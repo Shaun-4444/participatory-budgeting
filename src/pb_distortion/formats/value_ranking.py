@@ -1,8 +1,9 @@
-"""Value ranking ballot format: voters rank all projects by raw utility.
+"""Value ranking ballot format: voters rank projects by raw utility.
 
-Each voter submits a strict ordinal ranking of all candidate projects in descending
-order of their raw perceived utility u_i(j). Ties are broken deterministically by
-ascending project ID. Only ordinal ordering is retained; cardinal magnitudes are
+Each voter submits a strict ordinal ranking of candidate projects in descending
+order of their raw perceived utility u_i(j) for all projects with positive utility
+u_i(j) > 0. Projects with zero utility are unranked. Ties are broken deterministically
+by ascending project ID. Only ordinal ordering is retained; cardinal magnitudes are
 discarded.
 
 Reference: Benadè et al. (2021), "Preference Elicitation for Participatory Budgeting",
@@ -24,10 +25,11 @@ ValueRankingBallot = tuple[str, ...]
 
 @dataclass(frozen=True, slots=True)
 class ValueRankingFormat:
-    """Elicit a ranking of all projects by raw perceived utility, highest first.
+    """Elicit a ranking of projects by raw perceived utility, highest first.
 
-    The returned ballot is an ordered tuple of all project IDs in descending utility order.
-    Ties are broken by ascending project ID for full determinism.
+    The returned ballot is an ordered tuple of project IDs in descending utility order
+    for projects with positive utility (u_i(j) > 0). Ties are broken by ascending
+    project ID for full determinism. Projects with zero utility are not ranked.
     """
 
     name: str = "value_ranking"
@@ -44,9 +46,9 @@ class ValueRankingFormat:
             raise ValueError("Utilities must be finite and non-negative.")
 
         project_ids = instance.project_ids
+        positive_indices = [index for index, val in enumerate(values) if val > 0]
         ordering = sorted(
-            range(len(project_ids)),
+            positive_indices,
             key=lambda index: (-values[index], project_ids[index]),
         )
         return tuple(project_ids[index] for index in ordering)
-
