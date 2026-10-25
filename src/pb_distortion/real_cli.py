@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from pb_distortion.formats.knapsack import KnapsackBallotFormat
+from pb_distortion.formats.threshold_approval import ThresholdApprovalBallotFormat
 from pb_distortion.formats.value_ranking import ValueRankingFormat
 from pb_distortion.formats.vfm_ranking import VFMRankingFormat
 from pb_distortion.pabulib_data import load_pabulib_knapsack
@@ -19,7 +20,9 @@ from pb_distortion.pabulib_sweep import (
     write_pabulib_sweep_outputs,
 )
 from pb_distortion.plotting import plot_distortion_summary
+from pb_distortion.protocols import AggregationRule, ElicitationFormat
 from pb_distortion.rules.greedy_approval import GreedyApprovalRule
+from pb_distortion.rules.threshold_approval import ThresholdApprovalRule
 from pb_distortion.rules.value_ranking import HarmonicValueRankingRule
 from pb_distortion.rules.vfm_ranking import HarmonicVFMRankingRule
 
@@ -45,13 +48,22 @@ def main() -> None:
     parser.add_argument("--output", help="Override the output base directory.")
     parser.add_argument("--seed", type=int, help="Override the master seed.")
     parser.add_argument(
+        "--format",
+        "--ballot-format",
         "--ballot",
-        choices=("all", "knapsack", "value_ranking", "vfm_ranking"),
+        dest="ballot_format",
+        choices=("all", "knapsack", "value_ranking", "vfm_ranking", "threshold_approval"),
         default="all",
         help=(
-            "Ballot format(s) to evaluate (default: 'all' to compare Knapsack, "
-            "Value Ranking, and VFM Ranking)."
+            "Select ballot format(s) to evaluate: 'all', 'knapsack', 'value_ranking', "
+            "'vfm_ranking', or 'threshold_approval' (default: all)."
         ),
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Approval threshold for threshold_approval format (default: 1/m).",
     )
     arguments = parser.parse_args()
 
@@ -89,19 +101,23 @@ def main() -> None:
 
     election = load_pabulib_knapsack(dataset_path)
 
-    available_pairs = {
-        "knapsack": (KnapsackBallotFormat(), GreedyApprovalRule()),
-        "value_ranking": (ValueRankingFormat(), HarmonicValueRankingRule()),
-        "vfm_ranking": (VFMRankingFormat(), HarmonicVFMRankingRule()),
-    }
-    if arguments.ballot == "all":
-        format_rules = [
-            available_pairs["knapsack"],
-            available_pairs["value_ranking"],
-            available_pairs["vfm_ranking"],
-        ]
-    else:
-        format_rules = [available_pairs[arguments.ballot]]
+    format_rules: list[tuple[ElicitationFormat[Any], AggregationRule[Any]]] = []
+    if arguments.ballot_format in ("all", "knapsack"):
+        format_rules.append((KnapsackBallotFormat(), GreedyApprovalRule()))
+    if arguments.ballot_format in ("all", "value_ranking"):
+        format_rules.append((ValueRankingFormat(), HarmonicValueRankingRule()))
+    if arguments.ballot_format in ("all", "vfm_ranking"):
+        format_rules.append((VFMRankingFormat(), HarmonicVFMRankingRule()))
+    if arguments.ballot_format in ("all", "threshold_approval"):
+        format_rules.append(
+            (
+                ThresholdApprovalBallotFormat(
+                    threshold=arguments.threshold,
+                    relative=True,
+                ),
+                ThresholdApprovalRule(),
+            )
+        )
 
     print(
         f"Loaded {election.metadata.get('description', election.source_path.name)}: "
@@ -134,22 +150,25 @@ def main() -> None:
         output_directory,
     )
 
-    summary_by_curve = defaultdict(dict)
-    for summary in summaries:
-        curve_name = summary.format_name
-        summary_by_curve[curve_name][summary.project_count] = summary
-
     means: dict[str, list[float]] = {}
     errors: dict[str, tuple[list[float], list[float]]] = {}
-    for curve_name, counts_dict in summary_by_curve.items():
-        means[curve_name] = [counts_dict[m].mean_distortion for m in settings.project_counts]
+    for fmt, rule in format_rules:
+        curve_name = f"{fmt.name} + {rule.name}"
+        summary_by_count = {
+            summary.project_count: summary
+            for summary in summaries
+            if summary.format_name == curve_name
+        }
+        means[curve_name] = [
+            summary_by_count[m].mean_distortion for m in settings.project_counts
+        ]
         errors[curve_name] = (
             [
-                counts_dict[m].mean_distortion - counts_dict[m].ci_lower
+                summary_by_count[m].mean_distortion - summary_by_count[m].ci_lower
                 for m in settings.project_counts
             ],
             [
-                counts_dict[m].ci_upper - counts_dict[m].mean_distortion
+                summary_by_count[m].ci_upper - summary_by_count[m].mean_distortion
                 for m in settings.project_counts
             ],
         )
@@ -167,10 +186,16 @@ def main() -> None:
     )
 
     print(f"Utility inference diagnostics: {diagnostics}")
-    for curve_name, counts_dict in summary_by_curve.items():
+    for fmt, rule in format_rules:
+        curve_name = f"{fmt.name} + {rule.name}"
+        summary_by_count = {
+            summary.project_count: summary
+            for summary in summaries
+            if summary.format_name == curve_name
+        }
         print(f"\n--- {curve_name} ---")
         for m in settings.project_counts:
-            s = counts_dict[m]
+            s = summary_by_count[m]
             print(
                 f"  m={s.project_count}: mean distortion={s.mean_distortion:.6f} "
                 f"({settings.confidence_level:.0%} CI {s.ci_lower:.6f} to {s.ci_upper:.6f})"

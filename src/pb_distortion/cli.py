@@ -12,10 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from pb_distortion.formats.knapsack import KnapsackBallotFormat
+from pb_distortion.formats.threshold_approval import ThresholdApprovalBallotFormat
 from pb_distortion.formats.value_ranking import ValueRankingFormat
 from pb_distortion.formats.vfm_ranking import VFMRankingFormat
 from pb_distortion.plotting import plot_distortion_summary
 from pb_distortion.rules.greedy_approval import GreedyApprovalRule
+from pb_distortion.rules.threshold_approval import ThresholdApprovalRule
 from pb_distortion.rules.value_ranking import HarmonicValueRankingRule
 from pb_distortion.rules.vfm_ranking import HarmonicVFMRankingRule
 from pb_distortion.simulation import SimulationSettings, run_simulation, write_simulation_outputs
@@ -139,15 +141,25 @@ def main() -> None:
         help="Run a separate project-count sweep at each sigma and plot them together.",
     )
     parser.add_argument(
+        "--format",
+        "--ballot-format",
         "--ballot",
-        choices=("knapsack", "value_ranking", "vfm_ranking"),
+        dest="ballot_format",
+        choices=("knapsack", "value_ranking", "vfm_ranking", "threshold_approval"),
         default="knapsack",
         help=(
-            "Ballot format and aggregation rule to use. 'knapsack' uses the knapsack ballot "
-            "with greedy approval (baseline). 'value_ranking' uses value-ranking ballots with "
-            "harmonic scoring and cost bucketing. 'vfm_ranking' uses value-for-money ranking "
-            "ballots with harmonic scoring and cost bucketing. Default: knapsack."
+            "Ballot format and aggregation rule to use: "
+            "'knapsack' (greedy approval), "
+            "'value_ranking' (harmonic value ranking), "
+            "'vfm_ranking' (harmonic value-for-money ranking), "
+            "'threshold_approval' (threshold approval). Default: knapsack."
         ),
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Approval threshold for threshold_approval format (default: 1/m).",
     )
     arguments = parser.parse_args()
     if arguments.noise_sigma is not None and arguments.noise_sigmas is not None:
@@ -165,12 +177,19 @@ def main() -> None:
     if not output_base_directory.is_absolute():
         output_base_directory = config_path.parent.parent / output_base_directory
 
-    _ballot_pairs = {
-        "knapsack": (KnapsackBallotFormat(), GreedyApprovalRule()),
-        "value_ranking": (ValueRankingFormat(), HarmonicValueRankingRule()),
-        "vfm_ranking": (VFMRankingFormat(), HarmonicVFMRankingRule()),
-    }
-    ballot_format, aggregation_rule = _ballot_pairs[arguments.ballot]
+    if arguments.ballot_format == "threshold_approval":
+        ballot_format = ThresholdApprovalBallotFormat(threshold=arguments.threshold)
+        aggregation_rule = ThresholdApprovalRule()
+    elif arguments.ballot_format == "value_ranking":
+        ballot_format = ValueRankingFormat()
+        aggregation_rule = HarmonicValueRankingRule()
+    elif arguments.ballot_format == "vfm_ranking":
+        ballot_format = VFMRankingFormat()
+        aggregation_rule = HarmonicVFMRankingRule()
+    else:
+        ballot_format = KnapsackBallotFormat()
+        aggregation_rule = GreedyApprovalRule()
+
     project_counts = config["instance"].get("project_counts")
     analysis_config = config.get("analysis", {})
     bootstrap_resamples = int(analysis_config.get("bootstrap_resamples", 2000))

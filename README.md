@@ -44,6 +44,23 @@ uv run pb-distortion --config configs/project_count_sweep.toml
 
 The sweep config uses 200 elections per point, 50 voters, seed 42, costs from 1 to 10, budget fraction 0.33, and project counts 5, 10, 20, 30, 40, 50, 75, 100, 150, and 200. It writes trial results, a summary with 95% percentile-bootstrap confidence intervals, metadata, and an SVG plot.
 
+### Choose the ballot format
+
+By default, elections use the knapsack ballot format with greedy approval aggregation. You can run threshold approval voting using `--format threshold_approval`:
+
+```bash
+# Threshold approval baseline (default threshold 1/m, greedy cost-ratio aggregation)
+uv run pb-distortion --config configs/baseline.toml --format threshold_approval
+
+# Project-count sweep with threshold approval
+uv run pb-distortion --config configs/project_count_sweep.toml --format threshold_approval
+
+# Configure threshold explicitly
+uv run pb-distortion --config configs/baseline.toml --format threshold_approval --threshold 0.1
+```
+
+Threshold approval aggregates ballots using the **greedy approval-to-cost ratio** rule (`approvals / cost`) with skip logic, following the canonical theoretical formulation of Benadè et al. (Theorem 14).
+
 ### Choose the utility distribution
 
 The same config can be reused for all supported distributions:
@@ -99,7 +116,12 @@ The repository includes a Pabulib loader and a model-based experiment for the
 Amsterdam Centrum 2020 dataset:
 
 ```bash
+# Compare both Knapsack and Threshold Approval side-by-side (default)
 uv run pb-distortion-pabulib --config configs/pabulib_amsterdam.toml
+
+# Or run a specific format:
+uv run pb-distortion-pabulib --config configs/pabulib_amsterdam.toml --format threshold_approval
+uv run pb-distortion-pabulib --config configs/pabulib_amsterdam.toml --format knapsack
 ```
 
 The loader checks that the file contains approval ballots with a finite
@@ -133,8 +155,7 @@ The dataset also has neighborhood-specific budget caps and an official
 `greedy-custom` outcome. This experiment follows the paper's single-budget
 knapsack model, so it does not enforce those neighborhood caps or reproduce
 the official outcome. Its distortion is evaluated on sampled utilities, not
-unobserved true utilities. Only the knapsack format is currently implemented;
-additional format modules can use the same sweep runner once added.
+unobserved true utilities. The runner evaluates all selected formats (`knapsack`, `threshold_approval`, or both via `all`) on the identical inferred utilities and project subsets.
 
 The run writes `trials.csv`, `summary.csv`, `run.json`, and
 `distortion_by_project_count.svg` in a new folder under `outputs/pabulib/`.
@@ -172,7 +193,9 @@ src/pb_distortion/
   generation.py             Utility draws, normalization, and noise
   protocols.py              Interfaces for ballots and aggregation rules
   formats/knapsack.py       Knapsack ballot elicitation
+  formats/threshold_approval.py Threshold approval ballot elicitation
   rules/greedy_approval.py  Greedy approval-count aggregation
+  rules/threshold_approval.py Threshold approval greedy cost-ratio aggregation
   solvers.py                Exact integer-cost knapsack dynamic program
   metrics.py                Welfare and sampled distortion
   simulation.py             Election runner and trial output
