@@ -337,6 +337,8 @@ def write_pabulib_sweep_outputs(
     summaries: Sequence[PabulibProjectCountSummary],
     diagnostics: dict[str, int],
     output_directory: str | Path,
+    *,
+    extra_metadata: Mapping[str, Any] | None = None,
 ) -> tuple[Path, Path, Path]:
     """Write trial data, summary intervals, and reproducibility metadata."""
 
@@ -408,6 +410,8 @@ def write_pabulib_sweep_outputs(
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
     }
+    if extra_metadata:
+        metadata.update(extra_metadata)
     try:
         import scipy
 

@@ -21,6 +21,7 @@ from pb_distortion.rules.threshold_approval import ThresholdApprovalRule
 from pb_distortion.rules.value_ranking import HarmonicValueRankingRule
 from pb_distortion.rules.vfm_ranking import HarmonicVFMRankingRule
 from pb_distortion.simulation import SimulationSettings, run_simulation, write_simulation_outputs
+from pb_distortion.threshold_validation import learn_threshold_synthetic
 from pb_distortion.sweeps import (
     run_noise_sweep,
     run_project_count_sweep,
@@ -159,7 +160,23 @@ def main() -> None:
         "--threshold",
         type=float,
         default=None,
-        help="Approval threshold for threshold_approval format (default: 1/m).",
+        help="Approval threshold for threshold_approval format (default: learned via validation).",
+    )
+    parser.add_argument(
+        "--threshold-selection",
+        choices=("validation", "fixed", "dynamic_1_over_m"),
+        default=None,
+        help=(
+            "Method to select approval threshold: 'validation' (learns on holdout trials), "
+            "'fixed' (uses --threshold), or 'dynamic_1_over_m' (1/m). "
+            "Defaults to 'validation' if --threshold is not specified, otherwise 'fixed'."
+        ),
+    )
+    parser.add_argument(
+        "--validation-trials",
+        type=int,
+        default=50,
+        help="Number of holdout validation trials to evaluate candidate thresholds (default: 50).",
     )
     arguments = parser.parse_args()
     if arguments.noise_sigma is not None and arguments.noise_sigmas is not None:
@@ -178,7 +195,32 @@ def main() -> None:
         output_base_directory = config_path.parent.parent / output_base_directory
 
     if arguments.ballot_format == "threshold_approval":
-        ballot_format = ThresholdApprovalBallotFormat(threshold=arguments.threshold)
+        thresh_mode = arguments.threshold_selection
+        if thresh_mode is None:
+            thresh_mode = "fixed" if arguments.threshold is not None else "validation"
+
+        if thresh_mode == "validation":
+            print("==================================================================")
+            print(f"Threshold Validation Phase (Holdout set: {arguments.validation_trials} trials)")
+            print("==================================================================")
+            print("Evaluating candidate thresholds on synthetic holdout data...")
+            val_result = learn_threshold_synthetic(
+                settings,
+                validation_trials=arguments.validation_trials,
+            )
+            print("Validation Results:")
+            for t_cand, dist_val in val_result.validation_distortions.items():
+                marker = " <-- BEST" if t_cand == val_result.selected_threshold else ""
+                print(f"  t={t_cand:.3f}: validation distortion={dist_val:.4f}{marker}")
+            print(
+                f"Learned optimal threshold t* = {val_result.selected_threshold:.3f} "
+                f"(validation distortion: {val_result.best_validation_distortion:.4f})"
+            )
+            ballot_format = ThresholdApprovalBallotFormat(threshold=val_result.selected_threshold)
+        elif thresh_mode == "dynamic_1_over_m":
+            ballot_format = ThresholdApprovalBallotFormat(threshold=None)
+        else:
+            ballot_format = ThresholdApprovalBallotFormat(threshold=arguments.threshold)
         aggregation_rule = ThresholdApprovalRule()
     elif arguments.ballot_format == "value_ranking":
         ballot_format = ValueRankingFormat()

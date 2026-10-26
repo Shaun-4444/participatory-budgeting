@@ -8,11 +8,13 @@ from pathlib import Path
 
 
 def _write_svg_plot(
-    project_counts: Sequence[int],
+    x_values: Sequence[int | float],
     means: Mapping[str, Sequence[float]],
     errors: Mapping[str, tuple[Sequence[float], Sequence[float]]],
     destination: Path,
     title: str,
+    x_label: str = "Number of projects",
+    x_ticks: Sequence[int | float] | None = None,
 ) -> None:
     """Write a self-contained vector plot without an optional plotting runtime."""
 
@@ -39,8 +41,9 @@ def _write_svg_plot(
     y_max = data_max + 0.10 * max(data_max - y_min, 0.05)
     if y_max <= y_min:
         y_max = y_min + 0.1
-    x_min = min(project_counts)
-    x_max = max(project_counts)
+    all_x = list(x_values) + (list(x_ticks) if x_ticks is not None else [])
+    x_min = min(all_x)
+    x_max = max(all_x)
     if x_min == x_max:
         x_min -= 1
         x_max += 1
@@ -67,27 +70,29 @@ def _write_svg_plot(
         [
             f'<line class="axis" x1="{left}" y1="{top}" x2="{left}" y2="{plot_bottom}"/>',
             f'<line class="axis" x1="{left}" y1="{plot_bottom}" x2="{plot_right}" y2="{plot_bottom}"/>',
-            f'<text x="{left + plot_width / 2:.2f}" y="{height - 34}" text-anchor="middle" font-size="16">Number of projects</text>',
+            f'<text x="{left + plot_width / 2:.2f}" y="{height - 34}" text-anchor="middle" font-size="16">{escape(x_label)}</text>',
             f'<text x="25" y="{top + plot_height / 2:.2f}" text-anchor="middle" font-size="16" transform="rotate(-90 25 {top + plot_height / 2:.2f})">Distortion (lower is better)</text>',
         ]
     )
 
-    for count in project_counts:
-        x = x_position(count)
+    ticks_to_draw = x_ticks if x_ticks is not None else x_values
+    for val in ticks_to_draw:
+        x = x_position(val)
         parts.append(f'<line class="axis" x1="{x:.2f}" y1="{plot_bottom}" x2="{x:.2f}" y2="{plot_bottom + 5}"/>')
-        parts.append(f'<text x="{x:.2f}" y="{plot_bottom + 24}" text-anchor="middle" font-size="12">{count}</text>')
+        label = f"{val:.2f}" if isinstance(val, float) else str(val)
+        parts.append(f'<text x="{x:.2f}" y="{plot_bottom + 24}" text-anchor="middle" font-size="12">{label}</text>')
 
     for format_index, (format_name, values) in enumerate(means.items()):
         color = colors[format_index % len(colors)]
         lower_errors, upper_errors = errors[format_name]
         points = [
-            (x_position(count), y_position(value))
-            for count, value in zip(project_counts, values, strict=True)
+            (x_position(val), y_position(value))
+            for val, value in zip(x_values, values, strict=True)
         ]
         point_string = " ".join(f"{x:.2f},{y:.2f}" for x, y in points)
         parts.append(f'<polyline points="{point_string}" fill="none" stroke="{color}" stroke-width="2.5"/>')
-        for count, value, lower_error, upper_error, (x, y) in zip(
-            project_counts, values, lower_errors, upper_errors, points, strict=True
+        for val, value, lower_error, upper_error, (x, y) in zip(
+            x_values, values, lower_errors, upper_errors, points, strict=True
         ):
             y_low = y_position(value - lower_error)
             y_high = y_position(value + upper_error)
@@ -108,12 +113,14 @@ def _write_svg_plot(
 
 
 def plot_distortion_summary(
-    project_counts: Sequence[int],
+    project_counts: Sequence[int | float],
     means: Mapping[str, Sequence[float]],
     errors: Mapping[str, tuple[Sequence[float], Sequence[float]]],
     output_path: str | Path,
     *,
     title: str = "Distortion by project count",
+    x_label: str = "Number of projects",
+    x_ticks: Sequence[int | float] | None = None,
 ) -> Path:
     """Plot means with caller-provided error bars for each ballot format."""
 
@@ -140,7 +147,15 @@ def plot_distortion_summary(
 
     destination = Path(output_path)
     if destination.suffix.lower() == ".svg":
-        _write_svg_plot(project_counts, means, errors, destination, title)
+        _write_svg_plot(
+            project_counts,
+            means,
+            errors,
+            destination,
+            title,
+            x_label=x_label,
+            x_ticks=x_ticks,
+        )
         return destination
 
     import matplotlib.pyplot as plt
@@ -155,10 +170,12 @@ def plot_distortion_summary(
             capsize=3,
             label=format_name,
         )
-    axis.set_xlabel("Number of projects")
+    axis.set_xlabel(x_label)
     axis.set_ylabel("Distortion (lower is better)")
     axis.set_ylim(bottom=1.0)
     axis.set_title(title)
+    if x_ticks is not None:
+        axis.set_xticks(x_ticks)
     axis.grid(True, alpha=0.25)
     axis.legend()
     figure.tight_layout()
