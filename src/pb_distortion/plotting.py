@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from html import escape
 from pathlib import Path
 
+import numpy as np
+
 
 def _write_svg_plot(
     x_values: Sequence[int | float],
@@ -182,4 +184,113 @@ def plot_distortion_summary(
     destination.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(destination, dpi=160)
     plt.close(figure)
+    return destination
+
+
+def plot_strategic_comparison(
+    format_names: Sequence[str],
+    honest_means: Sequence[float],
+    honest_errors: tuple[Sequence[float], Sequence[float]],
+    strategic_means: Sequence[float],
+    strategic_errors: tuple[Sequence[float], Sequence[float]],
+    welfare_losses: Sequence[float],
+    success_rates: Sequence[float],
+    output_path: str | Path,
+    *,
+    title: str = "Strategic Voting Degradation Across PB Formats",
+) -> Path:
+    """Generate side-by-side comparison charts for honest vs strategic voting metrics."""
+    import matplotlib.pyplot as plt
+
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5))
+    x = np.arange(len(format_names))
+    width = 0.35
+
+    # Panel 1: Honest vs Strategic Distortion
+    bars1 = ax1.bar(
+        x - width / 2,
+        honest_means,
+        width,
+        yerr=honest_errors,
+        capsize=4,
+        label="Honest Voting",
+        color="#2b5c8f",
+        alpha=0.9,
+    )
+    bars2 = ax1.bar(
+        x + width / 2,
+        strategic_means,
+        width,
+        yerr=strategic_errors,
+        capsize=4,
+        label="Strategic (Misreport)",
+        color="#d1495b",
+        alpha=0.9,
+    )
+
+    ax1.set_ylabel("Distortion (lower is better)", fontsize=12)
+    ax1.set_title("Distortion: Honest vs. Strategic", fontsize=13, fontweight="bold")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(format_names, rotation=15, ha="right", fontsize=10)
+    ax1.set_ylim(bottom=1.0)
+    ax1.grid(axis="y", linestyle="--", alpha=0.4)
+    ax1.legend(loc="upper left")
+
+    # Add delta labels over bars
+    for i, (h, s) in enumerate(zip(honest_means, strategic_means, strict=True)):
+        diff = s - h
+        color = "#a00" if diff > 0.001 else "#333"
+        sign = "+" if diff > 0 else ""
+        ax1.text(
+            x[i] + width / 2,
+            s + strategic_errors[1][i] + 0.01,
+            f"{sign}{diff:.3f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            color=color,
+            fontweight="bold",
+        )
+
+    # Panel 2: Welfare Loss and Manipulation Success Rate
+    ax2_twin = ax2.twinx()
+    b1 = ax2.bar(
+        x - width / 2,
+        welfare_losses,
+        width,
+        label="Social Welfare Loss (%)",
+        color="#e07a5f",
+        alpha=0.85,
+    )
+    b2 = ax2_twin.bar(
+        x + width / 2,
+        [rate * 100 for rate in success_rates],
+        width,
+        label="Manipulation Success Rate (%)",
+        color="#3d405b",
+        alpha=0.85,
+    )
+
+    ax2.set_ylabel("Social Welfare Loss (%)", color="#c04e30", fontsize=11)
+    ax2_twin.set_ylabel("Manipulation Success Rate (%)", color="#3d405b", fontsize=11)
+    ax2.set_title("Vulnerability & Welfare Degradation", fontsize=13, fontweight="bold")
+    ax2.set_xticks(x)
+    ax2_xticklabels = [name.replace(" ", "\n") for name in format_names]
+    ax2.set_xticklabels(format_names, rotation=15, ha="right", fontsize=10)
+    ax2.grid(axis="y", linestyle="--", alpha=0.4)
+    ax2.set_ylim(bottom=0.0)
+    ax2_twin.set_ylim(bottom=0.0, top=max(max([r * 100 for r in success_rates], default=10), 10) * 1.25)
+
+    # Combined legend for panel 2
+    lines = [b1, b2]
+    labels = [l.get_label() for l in lines]
+    ax2.legend(lines, labels, loc="upper right", fontsize=9)
+
+    fig.suptitle(title, fontsize=15, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    fig.savefig(destination, dpi=200, bbox_inches="tight")
+    plt.close(fig)
     return destination
