@@ -151,3 +151,42 @@ def test_threshold_approval_invalid_mapping():
         ThresholdApprovalBallotFormat(threshold={5: -0.1})
     with pytest.raises(ValueError, match="finite non-negative"):
         ThresholdApprovalBallotFormat(threshold={5: float("nan")})
+
+
+def test_learn_threshold_synthetic_per_project_count():
+    settings = SimulationSettings(
+        trials=5,
+        master_seed=42,
+        project_count=10,
+        voter_count=20,
+        cost_min=1,
+        cost_max=10,
+        budget_fraction=0.33,
+        utility_distribution="uniform",
+    )
+    project_counts = (4, 8)
+    multipliers = (0.5, 1.0, 1.5)
+    result = learn_threshold_synthetic(
+        settings,
+        project_counts=project_counts,
+        candidate_multipliers=multipliers,
+        validation_trials=3,
+    )
+
+    assert result.per_project_count_thresholds is not None
+    assert set(result.per_project_count_thresholds.keys()) == {4, 8}
+    assert result.per_project_count_distortions is not None
+    assert set(result.per_project_count_distortions.keys()) == {4, 8}
+
+    cand_4 = {round(alpha / 4, 6) for alpha in multipliers}
+    assert set(result.per_project_count_distortions[4].keys()) == cand_4
+    assert result.per_project_count_thresholds[4] in cand_4
+
+    cand_8 = {round(alpha / 8, 6) for alpha in multipliers}
+    assert set(result.per_project_count_distortions[8].keys()) == cand_8
+    assert result.per_project_count_thresholds[8] in cand_8
+
+    meta = result.to_metadata_dict()
+    assert "per_project_count_thresholds" in meta
+    assert meta["per_project_count_thresholds"]["4"] == result.per_project_count_thresholds[4]
+

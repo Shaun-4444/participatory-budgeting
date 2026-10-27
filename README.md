@@ -49,17 +49,18 @@ The sweep config uses 200 elections per point, 50 voters, seed 42, costs from 1 
 By default, elections use the knapsack ballot format with greedy approval aggregation. You can run threshold approval voting using `--format threshold_approval`:
 
 ```bash
-# Threshold approval baseline (default threshold 1/m, greedy cost-ratio aggregation)
+# Threshold approval baseline (default threshold tuned via holdout validation)
 uv run pb-distortion --config configs/baseline.toml --format threshold_approval
 
-# Project-count sweep with threshold approval
+# Project-count sweep with threshold approval (learns optimal threshold for each m via validation)
 uv run pb-distortion --config configs/project_count_sweep.toml --format threshold_approval
 
-# Configure threshold explicitly
+# Configure threshold explicitly or select theoretical 1/m
 uv run pb-distortion --config configs/baseline.toml --format threshold_approval --threshold 0.1
+uv run pb-distortion --config configs/project_count_sweep.toml --format threshold_approval --threshold-selection dynamic_1_over_m
 ```
 
-Threshold approval aggregates ballots using the **greedy approval-to-cost ratio** rule (`approvals / cost`) with skip logic, following the canonical theoretical formulation of Benadè et al. (Theorem 14).
+Threshold approval aggregates ballots using the **greedy approval-to-cost ratio** rule (`approvals / cost`) with skip logic, following the canonical theoretical formulation of Benadè et al. (Theorem 14). By default, the threshold selection method is set to `validation` (holdout tuning), which tunes $t^*(m)$ over candidate multipliers $\alpha \cdot \frac{1}{m}$ independently for each project count $m$ to avoid threshold mismatch.
 
 ### Choose the utility distribution
 

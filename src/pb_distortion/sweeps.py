@@ -132,6 +132,7 @@ def write_project_count_sweep_outputs(
     confidence_level: float,
     output_directory: str | Path,
     source_config: dict[str, Any] | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
 ) -> tuple[Path, Path, Path]:
     """Write trial CSV, summary CSV, and run metadata for a sweep."""
 
@@ -181,6 +182,8 @@ def write_project_count_sweep_outputs(
         "numpy_version": np.__version__,
         "source_config": source_config or {},
     }
+    if extra_metadata:
+        metadata.update(extra_metadata)
     metadata_path.write_text(
         json.dumps(metadata, indent=2, sort_keys=True),
         encoding="utf-8",
