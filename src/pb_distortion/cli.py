@@ -194,29 +194,58 @@ def main() -> None:
     if not output_base_directory.is_absolute():
         output_base_directory = config_path.parent.parent / output_base_directory
 
+    project_counts = config["instance"].get("project_counts")
+    counts = tuple(int(count) for count in project_counts) if project_counts is not None else None
+    analysis_config = config.get("analysis", {})
+    bootstrap_resamples = int(analysis_config.get("bootstrap_resamples", 2000))
+    confidence_level = float(analysis_config.get("confidence_level", 0.95))
+
+    extra_metadata: dict[str, Any] = {}
     if arguments.ballot_format == "threshold_approval":
         thresh_mode = arguments.threshold_selection
         if thresh_mode is None:
             thresh_mode = "fixed" if arguments.threshold is not None else "validation"
 
         if thresh_mode == "validation":
-            print("==================================================================")
-            print(f"Threshold Validation Phase (Holdout set: {arguments.validation_trials} trials)")
-            print("==================================================================")
-            print("Evaluating candidate thresholds on synthetic holdout data...")
-            val_result = learn_threshold_synthetic(
-                settings,
-                validation_trials=arguments.validation_trials,
-            )
-            print("Validation Results:")
-            for t_cand, dist_val in val_result.validation_distortions.items():
-                marker = " <-- BEST" if t_cand == val_result.selected_threshold else ""
-                print(f"  t={t_cand:.3f}: validation distortion={dist_val:.4f}{marker}")
-            print(
-                f"Learned optimal threshold t* = {val_result.selected_threshold:.3f} "
-                f"(validation distortion: {val_result.best_validation_distortion:.4f})"
-            )
-            ballot_format = ThresholdApprovalBallotFormat(threshold=val_result.selected_threshold)
+            if counts is not None and len(counts) > 1:
+                print("==================================================================")
+                print(f"Threshold Validation Phase (Sweep over {len(counts)} project counts, {arguments.validation_trials} trials each)")
+                print("==================================================================")
+                print("Evaluating candidate thresholds on synthetic holdout data per project count...")
+                val_result = learn_threshold_synthetic(
+                    settings,
+                    project_counts=counts,
+                    validation_trials=arguments.validation_trials,
+                )
+                print("Learned optimal thresholds per project count via validation:")
+                for m_count, t_m in sorted(val_result.per_project_count_thresholds.items()):
+                    dists_for_m = (
+                        val_result.per_project_count_distortions[m_count]
+                        if val_result.per_project_count_distortions is not None
+                        else {}
+                    )
+                    best_d = dists_for_m.get(t_m, 0.0)
+                    print(f"  m={m_count:3d}: t*={t_m:.6f} (validation distortion: {best_d:.4f})")
+                ballot_format = ThresholdApprovalBallotFormat(threshold=val_result.per_project_count_thresholds)
+            else:
+                print("==================================================================")
+                print(f"Threshold Validation Phase (Holdout set: {arguments.validation_trials} trials)")
+                print("==================================================================")
+                print("Evaluating candidate thresholds on synthetic holdout data...")
+                val_result = learn_threshold_synthetic(
+                    settings,
+                    validation_trials=arguments.validation_trials,
+                )
+                print("Validation Results:")
+                for t_cand, dist_val in val_result.validation_distortions.items():
+                    marker = " <-- BEST" if t_cand == val_result.selected_threshold else ""
+                    print(f"  t={t_cand:.6f}: validation distortion={dist_val:.4f}{marker}")
+                print(
+                    f"Learned optimal threshold t* = {val_result.selected_threshold:.6f} "
+                    f"(validation distortion: {val_result.best_validation_distortion:.4f})"
+                )
+                ballot_format = ThresholdApprovalBallotFormat(threshold=val_result.selected_threshold)
+            extra_metadata["threshold_validation"] = val_result.to_metadata_dict()
         elif thresh_mode == "dynamic_1_over_m":
             ballot_format = ThresholdApprovalBallotFormat(threshold=None)
         else:
@@ -231,11 +260,6 @@ def main() -> None:
     else:
         ballot_format = KnapsackBallotFormat()
         aggregation_rule = GreedyApprovalRule()
-
-    project_counts = config["instance"].get("project_counts")
-    analysis_config = config.get("analysis", {})
-    bootstrap_resamples = int(analysis_config.get("bootstrap_resamples", 2000))
-    confidence_level = float(analysis_config.get("confidence_level", 0.95))
 
     if arguments.noise_sigmas is not None:
         if project_counts is None:
@@ -283,6 +307,7 @@ def main() -> None:
                 confidence_level=confidence_level,
                 output_directory=sigma_directory,
                 source_config=config,
+                extra_metadata=extra_metadata or None,
             )
             series_name = f"σ={sigma:g}"
             values = [summary.mean_distortion for summary in summaries]
@@ -358,6 +383,8 @@ def main() -> None:
             "confidence_level": confidence_level,
             "source_config": config,
         }
+        if extra_metadata:
+            batch_metadata.update(extra_metadata)
         (batch_directory / "noise_sweep_run.json").write_text(
             json.dumps(batch_metadata, indent=2, sort_keys=True),
             encoding="utf-8",
@@ -403,6 +430,7 @@ def main() -> None:
             confidence_level=confidence_level,
             output_directory=output_directory,
             source_config=config,
+            extra_metadata=extra_metadata or None,
         )
         means = {
             ballot_format.name: [summary.mean_distortion for summary in summaries]
@@ -441,6 +469,7 @@ def main() -> None:
         aggregation_rule_name=aggregation_rule.name,
         output_directory=output_directory,
         source_config=config,
+        extra_metadata=extra_metadata or None,
     )
     mean_distortion = sum(result.distortion for result in results) / len(results)
     print(f"Trials: {len(results)}")

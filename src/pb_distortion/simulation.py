@@ -8,7 +8,10 @@ import math
 import platform
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 import numpy as np
 
@@ -169,6 +172,7 @@ def write_simulation_outputs(
     aggregation_rule_name: str,
     output_directory: str | Path,
     source_config: dict[str, Any] | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
 ) -> tuple[Path, Path]:
     """Write CSV trial metrics and JSON settings/seeds for reproducibility."""
 
@@ -200,5 +204,7 @@ def write_simulation_outputs(
         "numpy_version": np.__version__,
         "source_config": source_config or {},
     }
+    if extra_metadata:
+        run_metadata.update(extra_metadata)
     json_path.write_text(json.dumps(run_metadata, indent=2, sort_keys=True), encoding="utf-8")
     return csv_path, json_path
